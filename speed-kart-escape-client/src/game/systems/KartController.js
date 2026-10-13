@@ -5,7 +5,7 @@
 
 import { kartTopVelocity, treadmillAt } from '../../shared/gameData.js';
 
-const RADIUS = 5.2;
+const RADIUS = 4; // smaller kart
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
 export class KartController {
@@ -59,18 +59,20 @@ export class KartController {
     if (this.driving) {
       const diff = wrap(Math.atan2(dx, dz) - this.ry);
       // Turn toward the wanted direction; still turns when parked so you can't get stuck.
-      const turnRate = 2.4 - Math.min(0.8, Math.abs(this.v) / 180);
+      const turnRate = 4.2;
       const step = Math.max(-turnRate * dt, Math.min(turnRate * dt, diff));
       this.ry = wrap(this.ry + step);
       steerTarget = Math.max(-1, Math.min(1, diff * 1.6));
       // Ease off the throttle during sharp turns so U-turns stay tight.
       const throttle = mag * (Math.abs(diff) > 1.7 ? 0.35 : Math.abs(diff) > 0.8 ? 0.7 : 1);
+      // Near-instant response: reaches full speed in ~0.15 s (no jolt).
       const wanted = top * throttle;
-      const a = this.v < wanted ? 26 + top * 0.55 : 40;
-      this.v = this.v < wanted ? Math.min(wanted, this.v + a * dt) : Math.max(wanted, this.v - a * dt);
+      const accelStep = (top / 0.15) * dt;
+      this.v = this.v < wanted ? Math.min(wanted, this.v + accelStep) : Math.max(wanted, this.v - accelStep);
     } else {
-      const drag = 30 * dt;
-      this.v = Math.abs(this.v) <= drag ? 0 : this.v - Math.sign(this.v) * drag;
+      // ...and stops within ~0.12 s of letting go.
+      const step = (Math.max(top, 1) / 0.12) * dt;
+      this.v = Math.abs(this.v) <= step ? 0 : this.v - Math.sign(this.v) * step;
     }
     this.steer += (steerTarget - this.steer) * Math.min(1, dt * 10);
 
