@@ -512,6 +512,7 @@ function InvitePanel({ onClose }) {
 function SettingsPanel({ game, onClose, identity }) {
   const [vol, setVol] = useState(sfx.volume);
   const [muted, setMuted] = useState(sfx.muted);
+  const [music, setMusic] = useState(sfx.musicOn);
   return (
     <Modal theme="rebirth" title="Settings" onClose={onClose}>
       <div className="set-row">
@@ -535,6 +536,18 @@ function SettingsPanel({ game, onClose, identity }) {
           }}
         >
           {muted ? 'Unmute' : 'Mute'}
+        </Btn>
+      </div>
+      <div className="set-row">
+        <span className="o">Background music</span>
+        <Btn
+          color={music ? 'green' : 'grey'}
+          onClick={() => {
+            sfx.setMusic(!music);
+            setMusic(!music);
+          }}
+        >
+          {music ? 'On' : 'Off'}
         </Btn>
       </div>
       <div className="set-row">

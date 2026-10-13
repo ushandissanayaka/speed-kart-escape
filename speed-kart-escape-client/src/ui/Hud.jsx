@@ -2,16 +2,13 @@
 import { useEffect, useRef, useState } from 'react';
 import * as legion from '../bloxity/legion.js';
 import {
-  BagIcon,
   BoostsIcon,
-  ChatIcon,
   CoinIcon,
   FriendsIcon,
   GemIcon,
   GiftIcon,
   HandIcon,
   KartsIcon,
-  MenuIcon,
   PlusIcon,
   QuestsIcon,
   RebirthIcon,
@@ -84,22 +81,6 @@ export function Hud({ game, profile, online, serverOffset, openPanel }) {
 
   return (
     <div className="hud">
-      {/* system pills */}
-      <div className="sys">
-        <div className="sys-pill">
-          <button className="press" title="Settings" onClick={() => openPanel('settings')}>
-            <MenuIcon />
-          </button>
-          <button className="press" title="Chat — use the Bloxity chat" onClick={() => openPanel('settings')}>
-            <ChatIcon />
-          </button>
-        </div>
-        <div className="sys-pill round">
-          <button className="press" title="Shop" onClick={() => openPanel('shop')}>
-            <BagIcon />
-          </button>
-        </div>
-      </div>
       {!online && <div className="offline-chip o">Offline mode</div>}
 
       <EventPill now={now} />

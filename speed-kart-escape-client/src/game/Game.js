@@ -59,12 +59,18 @@ export class Game {
     return Date.now() + this.serverOffset;
   }
 
+  // Reports loading progress to Bloxity's loading screen and to our own.
+  step(text, progress) {
+    legion.loadingStep(text);
+    this.events.emit('loading', { text, progress });
+  }
+
   async start() {
     legion.initLegion();
-    legion.loadingStep('Loading fonts…');
+    this.step('Loading fonts…', 0.08);
     await loadFonts();
 
-    legion.loadingStep('Building the starting place…');
+    this.step('Building the starting place…', 0.25);
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setSize(this.container.clientWidth, this.container.clientHeight);
@@ -87,7 +93,7 @@ export class Game {
     this.confetti = new Confetti(this.scene);
 
     // Local player
-    legion.loadingStep('Signing in…');
+    this.step('Signing in…', 0.6);
     await legion.waitForUser();
     const identity = legion.currentIdentity();
     this.identity = identity;
@@ -98,7 +104,7 @@ export class Game {
     this.player = new Racer(this.scene, { kart: 'noob' });
     this.respawn();
 
-    legion.loadingStep('Loading your avatar…');
+    this.step('Loading your avatar…', 0.7);
     await this.player.loadAvatar(legion.getAvatarData()).catch(() => {});
 
     try {
@@ -107,7 +113,7 @@ export class Game {
       this.kartThumbs = {};
     }
 
-    legion.loadingStep('Connecting…');
+    this.step('Connecting…', 0.85);
     this.session = await openSession(identity);
     this.bindSession();
     this.session.setAvatar(JSON.stringify(legion.getAvatarData()));
@@ -291,7 +297,7 @@ export class Game {
 
   die(cause) {
     if (this.dead) return;
-    sfx.error();
+    sfx.dead();
     // Logs knock you all the way back to the starting place.
     const toSpawn = cause === 'beam' || cause === 'spike' || cause === 'pit';
     this.dead = { until: performance.now() + DEATH_WAIT_MS, stage: Math.max(1, this.stage), cause, toSpawn };
@@ -347,7 +353,8 @@ export class Game {
       if (r.error) this.events.emit('toast', { text: r.error, kind: 'bad' });
       return;
     }
-    sfx.reward();
+    if (r.teleport === 'spawn') sfx.trophy();
+    else sfx.reward();
     if (r.toast) this.events.emit('toast', { text: r.toast, kind: 'good' });
     if (r.teleport === 'spawn') {
       // Trophy + confetti burst, then back to the starting place.
@@ -386,7 +393,7 @@ export class Game {
       if (now < coin.hiddenUntil || coin.def.stage !== s) continue;
       if (Math.hypot(c.x - coin.def.x, c.z - coin.def.z) < 7) {
         coin.hiddenUntil = now + STAGE_COIN_COOLDOWN_MS;
-        sfx.pop();
+        sfx.coin();
         this.stageAction({ type: 'collectCoin', id: coin.def.id });
       }
     }
