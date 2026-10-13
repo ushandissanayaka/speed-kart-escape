@@ -82,7 +82,7 @@ export class Game {
     this.world = new StartingPlace(this.scene);
     this.input = new Input();
     this.rig = new CameraRig(this.camera, renderer.domElement);
-    this.rig.bounds = { minX: -193, maxX: 193, minZ: -2600, maxZ: 54.5 };
+    this.rig.bounds = { minX: -193, maxX: 193, minZ: -2780, maxZ: 54.5 };
     this.controller = new KartController(this.world.collision);
     this.confetti = new Confetti(this.scene);
 
@@ -293,8 +293,9 @@ export class Game {
     if (this.dead) return;
     sfx.error();
     // Logs knock you all the way back to the starting place.
-    const toSpawn = cause === 'beam' || cause === 'spike';
+    const toSpawn = cause === 'beam' || cause === 'spike' || cause === 'pit';
     this.dead = { until: performance.now() + DEATH_WAIT_MS, stage: Math.max(1, this.stage), cause, toSpawn };
+    if (cause === 'pit') this.fall = { y: 0, v: 0 }; // drop down into the lava
     this.controller.v = 0;
     this.events.emit('death', { ms: DEATH_WAIT_MS, until: this.dead.until, toSpawn });
   }
@@ -432,7 +433,13 @@ export class Game {
     const input = this.dead || this.celebrating ? { x: 0, y: 0 } : this.input.read();
     this.controller.update(dt, input, this.rig.forward(), input.jump);
     const c = this.controller;
-    this.player.root.position.set(c.x, c.y + c.jumpY, c.z);
+    if (this.fall) {
+      if (this.dead) {
+        this.fall.v += 70 * dt;
+        this.fall.y = Math.min(32, this.fall.y + this.fall.v * dt);
+      } else this.fall = null;
+    }
+    this.player.root.position.set(c.x, c.y + c.jumpY - (this.fall?.y || 0), c.z);
     this.player.root.rotation.y = c.ry;
     this.player.root.updateMatrixWorld();
     this.player.animate(dt, c.v, c.steer, c.accel, c.topSpeed, c.jumpY > 0.4);

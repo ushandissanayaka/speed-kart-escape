@@ -143,6 +143,8 @@ export class StageCourse {
     this.spinners = []; // { pivot, x, z, len, speed, phase }
     this.sliders = []; // { mesh, x0, z, amp, speed, phase, hw, hd, y }
     this.fadeLabels = []; // big gate titles, faded out when the camera is close
+    this.pits = []; // lava pits [minX, maxX, minZ, maxZ]
+    this.lavaFields = []; // stage 4: lava everywhere except platforms
     this.spikeSections = []; // stage 3 pop-up spike fields
     this.beams = []; // logs sliding along z: { mesh, x, z0, z1, speed, phase, hw, top }
     this.orbs = []; // { mesh, z, amp, speed, phase, y }
@@ -212,7 +214,8 @@ export class StageCourse {
       this.collision.addBox(sx * wallX, zc, 6, len);
     }
 
-    if (theme === 'spikes') this.buildStage3(s, zMid);
+    if (theme === 'pits') this.buildStage4(s, zMid);
+    else if (theme === 'spikes') this.buildStage3(s, zMid);
     else if (theme === 'grass') this.buildGrass(s, zMid);
     else if (theme === 'desert') this.buildDesert(s, zMid);
     else if (theme === 'lava') this.buildLava(s, zMid);
@@ -678,6 +681,85 @@ export class StageCourse {
     for (const sl of sec.slabs) sl.visible = !calm;
   }
 
+  // Stage 4 (reference recording): brown brick floor with sunken orange lava pits.
+  // Long lava channels run along both sides of two raised safe blocks (drive along
+  // the block), and three full-width pits have to be jumped (Space) right at the
+  // edge. Drop into lava and you're sent back to the starting place. Stepped mauve
+  // rock ledges line both walls.
+  buildStage4(s, zMid) {
+    // No path through the middle: separate brick platforms over deep lava. Every
+    // gap must be jumped (Space). Fall in and you go back to the starting place.
+    const hw = s.hw;
+    const S = s.startZ;
+    const EDGE = hw - 26;
+    const BRICK4 = { light: '#a86a5c', dark: '#9a5e52', shadow: '#7a4a40', highlight: 'rgba(255,220,200,0.35)' };
+    const DEPTH = 34;
+    // Rows of separate blocks: lava strips between the rows, and gaps between the
+    // blocks in each row (nothing is joined). Rows alternate 3 and 2 blocks.
+    const plats = [[-EDGE, EDGE, 0, 30]]; // start
+    // wide lava gaps: you have to jump right from the edge
+    const three = [[-EDGE, -46], [-24, 24], [46, EDGE]];
+    const two = [[-60, -11], [11, 60]];
+    for (let r = 0; r < 6; r++) {
+      const d0 = 46 + r * 66;
+      for (const [x0, x1] of r % 2 ? two : three) plats.push([x0, x1, d0, d0 + 40]);
+    }
+    plats.push([-EDGE, EDGE, 442, s.len]); // in front of the Stage 5 door
+    for (const [x0, x1, d0, d1] of plats) {
+      const top = checkerBox(x1 - x0, DEPTH, d1 - d0, BRICK4);
+      top.position.set((x0 + x1) / 2, -DEPTH / 2, S - (d0 + d1) / 2);
+      this.root.add(top);
+    }
+    // Deep lava under everything
+    this.pitLava = new THREE.MeshLambertMaterial({ color: '#ff8a3a', emissive: '#ff6a10', emissiveIntensity: 0.55 });
+    const lava = new THREE.Mesh(new THREE.BoxGeometry(hw * 2 + 6, 1, s.len), this.pitLava);
+    lava.position.set(0, -DEPTH + 1.5, zMid);
+    this.root.add(lava);
+    // Dark blue crystals in the lava
+    const shardMat = new THREE.MeshLambertMaterial({ color: '#1a3cc8', emissive: '#0a1a6a', emissiveIntensity: 0.4 });
+    const rr = (i) => ((Math.sin(i * 91.3 + 7.1) * 43758.5453) % 1 + 1) % 1;
+    for (let i = 0; i < 40; i++) {
+      const x = (rr(i) - 0.5) * EDGE * 2;
+      const d = 30 + rr(i + 50) * (s.len - 70);
+      if (plats.some(([x0, x1, d0, d1]) => x > x0 - 3 && x < x1 + 3 && d > d0 - 3 && d < d1 + 3)) continue;
+      const sh = new THREE.Mesh(new THREE.ConeGeometry(1.4 + rr(i + 9) * 2, 4 + rr(i + 3) * 6, 4), shardMat);
+      sh.position.set(x, -DEPTH + 3, S - d);
+      sh.rotation.set(rr(i + 1) - 0.5, rr(i + 2) * 3, rr(i + 4) - 0.5);
+      this.root.add(sh);
+    }
+    // Cactus on a few platforms
+    for (const [x, d] of [[68, 66], [-34, 132], [68, 198], [34, 264], [-68, 330]]) {
+      const c = cactus();
+      c.scale.setScalar(1.3);
+      this.add(c, x, 0, S - d);
+      this.collision.addCircle(x, S - d, 2.4);
+    }
+    for (const sx of [-1, 1]) {
+      const side = studBox(hw + 3 - EDGE + 2, DEPTH, s.len + 2, '#8c6a7c', { unit: 2.6, cells: 2, style: 'dot', cast: false });
+      side.position.set(sx * (EDGE - 1 + (hw + 3 - EDGE + 2) / 2), -DEPTH / 2, zMid);
+      this.root.add(side);
+    }
+    this.lavaFields.push({ z0: S, z1: S - s.len, plats: plats.map(([x0, x1, d0, d1]) => [x0, x1, S - d1, S - d0]) });
+
+    // Stepped mauve rock ledges along both walls
+    const rnd = (i) => ((Math.sin(i * 37.7 + 1.9) * 43758.5453) % 1 + 1) % 1;
+    let k = 0;
+    for (const sx of [-1, 1]) {
+      for (let d = -2; d < s.len; d += 28) {
+        for (let tier = 0; tier < 3; tier++) {
+          const w = 10 + rnd(++k) * 8;
+          const h = 10 + tier * 14 + rnd(++k) * 5;
+          const len = 26 + rnd(++k) * 14;
+          const col = rnd(++k) > 0.5 ? '#8c6a7c' : '#a68494';
+          const slab = studBox(w, h, len, col, { unit: 2.6, cells: 2, style: 'dot', contrast: 0.6 });
+          slab.position.set(sx * (EDGE + 4 + tier * 7 + w / 2 - 4), h / 2, S - d - len / 2 + (rnd(++k) - 0.5) * 8);
+          this.root.add(slab);
+        }
+      }
+      this.collision.addBox(sx * (EDGE + 13), zMid, 26, s.len);
+    }
+  }
+
   // Stage 4: brick desert + spike fields with a moving gap
   buildDesert(s, zMid) {
     this.floor(s, BRICK);
@@ -1003,6 +1085,7 @@ export class StageCourse {
       a.position.y = (a.userData.baseY ?? 12) + Math.abs(Math.sin(t * 2.6)) * 3;
       a.rotation.y = Math.sin(t * 1.3) * 0.5;
     }
+    if (this.pitLava) this.pitLava.emissiveIntensity = 0.55 + Math.sin(t * 2.2) * 0.12;
     if (this.lavaMat) this.lavaMat.emissiveIntensity = 0.5 + Math.sin(t * 2) * 0.12;
   }
 
@@ -1029,6 +1112,13 @@ export class StageCourse {
   hazardAt(x, z, groundY, now, jumpY = 0) {
     const t = now / 1000;
     const R = 4.5;
+    for (const f of this.lavaFields) {
+      if (z > f.z0 - 1 || z < f.z1 + 1 || jumpY >= 0.6) continue;
+      if (!f.plats.some(([x0, x1, z0, z1]) => x > x0 - 3.5 && x < x1 + 3.5 && z > z0 - 3.5 && z < z1 + 3.5)) return 'pit';
+    }
+    for (const [x0, x1, z0, z1] of this.pits) {
+      if (x > x0 + 1.5 && x < x1 - 1.5 && z > z0 + 1.5 && z < z1 - 1.5 && jumpY < 0.6) return 'pit';
+    }
     for (const sec of this.spikeSections) {
       if (z > sec.z0 || z < sec.z1) continue;
       if (spikeRise(sec, t) < 0.35) continue;
