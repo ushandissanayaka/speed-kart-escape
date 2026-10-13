@@ -130,6 +130,7 @@ export const GEM_PRODUCTS = {
   wins_25k: { name: '25K WINS', grant: { wins: 25_000 }, displayPrice: 690 },
   wins_100k: { name: '100K WINS', grant: { wins: 100_000 }, displayPrice: 2700 },
   skip_rebirth: { name: 'Skip Rebirth', grant: { rebirth: true }, displayPrice: 49 },
+  away_10x: { name: 'Claim 10x Away Rewards', grant: { away10x: true }, displayPrice: 49 },
   skip_stage: { name: 'Skip Stage', grant: { skipStage: 1 }, displayPrice: 29 },
   revive: { name: 'Teleport Back', grant: {}, displayPrice: 9 },
   boost_speed: { name: 'Speed Boost +0.1', grant: { boostLevel: 'speed' }, displayPrice: 19 },
@@ -288,6 +289,8 @@ export function newProfile(now = Date.now()) {
     counters: { speedGained: 0, treadmillSeconds: 0, chestsClaimed: 0, levelsGained: 0, coinsWorld2: 0, world2Beaten: 0, stagesBeaten: 0, world1Beaten: 0 },
     daily: { day: dayKey(now), base: {}, claimed: [] },
     lastChestAt: 0,
+    lastSeen: now,
+    away: null, // pending { ms, speed, wins }
     skips: 0,
     transactions: [],
     createdAt: now,
@@ -420,6 +423,28 @@ export function questProgress(p, quest) {
   return { target: quest.target, value: Math.min(value, quest.target), done: value >= quest.target, claimed };
 }
 
+// --- away (offline) rewards -----------------------------------------------
+// Earned while the player was away: up to 8 hours, at least 1 minute away.
+export const AWAY_MAX_MS = 8 * 3_600_000;
+export const AWAY_MIN_MS = 60_000;
+// `lastSeen` is the last time the reward was claimed, so it builds up again from
+// then and the popup shows every time the game is opened (after 1+ minute).
+export function computeAway(p, now = Date.now()) {
+  const gone = now - (p.lastSeen || now);
+  p.away = null;
+  if (gone >= AWAY_MIN_MS) {
+    const ms = Math.min(gone, AWAY_MAX_MS);
+    const min = ms / 60_000;
+    p.away = {
+      ms,
+      speed: Math.round(min * 25 * speedMultiplier(p, now)),
+      wins: Math.round(min * 0.25 * (1 + p.rebirths) * boostMult(p.boosts.wins)),
+    };
+  }
+  if (!p.lastSeen) p.lastSeen = now;
+  return p.away;
+}
+
 // --- playtime --------------------------------------------------------------
 // session: { start, claimed: Set<index> } — lives only while the player is connected.
 export function playtimeState(session, now) {
@@ -449,6 +474,12 @@ export function applyGemProduct(p, sku, transactionId, now = Date.now()) {
   if (g.speed) addSpeed(p, g.speed, now, { countsForQuests: false });
   if (g.coins) p.coins += g.coins;
   if (g.wins) p.wins += g.wins;
+  if (g.away10x && p.away) {
+    addSpeed(p, p.away.speed * 10, now, { countsForQuests: false });
+    p.wins += p.away.wins * 10;
+    p.away = null;
+    p.lastSeen = now;
+  }
   if (g.skipStage) p.skips = (p.skips || 0) + g.skipStage;
   if (g.pass) p.passes[g.pass] = true;
   if (g.rebirth) doRebirth(p);
@@ -497,6 +528,14 @@ export function applyAction(p, action, now = Date.now(), session = null) {
       if (g.speed) addSpeed(p, g.speed, now, { countsForQuests: false });
       if (g.boost) giveSpeedBoost(p, g.boost, g.durationMs, now);
       return { ok: true, toast: `Claimed ${r.label}!` };
+    }
+    case 'claimAway': {
+      if (!p.away) return fail('Nothing to claim');
+      addSpeed(p, p.away.speed, now, { countsForQuests: false });
+      p.wins += p.away.wins;
+      p.away = null;
+      p.lastSeen = now;
+      return { ok: true, toast: 'Welcome back!' };
     }
     case 'claimQuest': {
       const q = QUESTS.find((x) => x.id === action.id);

@@ -3,6 +3,7 @@ import { Game } from './game/Game.js';
 import { ControlLayer, Hud, Popups } from './ui/Hud.jsx';
 import { PanelHost } from './ui/panels/Panels.jsx';
 import { PurchasePrompt } from './ui/PurchasePrompt.jsx';
+import { AwayPopup } from './ui/AwayPopup.jsx';
 import { newProfile } from './shared/gameData.js';
 
 // HUD scale: the reference was captured at 1918x1004.
@@ -22,6 +23,7 @@ export default function App() {
   const [identity, setIdentity] = useState(null);
   const [panel, setPanel] = useState(null);
   const [serverOffset, setServerOffset] = useState(0);
+  const [loading, setLoading] = useState({ text: 'Starting…', progress: 0.02 });
 
   useEffect(() => {
     const apply = () => document.documentElement.style.setProperty('--s', computeScale().toFixed(4));
@@ -34,7 +36,9 @@ export default function App() {
     const game = new Game(mountRef.current);
     gameRef.current = game;
     const offs = [
+      game.events.on('loading', (l) => setLoading(l)),
       game.events.on('ready', ({ online: o, identity: id }) => {
+        setLoading({ text: 'Ready!', progress: 1 });
         setOnline(o);
         setIdentity(id);
         setReady(true);
@@ -87,15 +91,32 @@ export default function App() {
           <ControlLayer game={game} touch={isTouch} />
           <Hud game={game} profile={profile} online={online} serverOffset={serverOffset} openPanel={openPanel} />
           <Popups game={game} />
+          <AwayPopup game={game} profile={profile} />
           <PurchasePrompt game={game} />
           {panel && <PanelHost panel={panel} game={game} profile={profile} identity={identity} onClose={closePanel} openPanel={openPanel} />}
         </>
       )}
+      {/* Loading screen: blurred artwork behind a dark card with the game icon and
+          title; tracks real progress and fades into the game when it is ready. */}
       <div className={`loading${ready ? ' done' : ''}`}>
-        <div className="title">
-          Speed <b>Kart</b> Escape
+        <div className="ld-bg" />
+        <div className="ld-center">
+          <img className="ld-icon" src="./loading-art.jpg" alt="" />
+          <div className="ld-title">
+            <span className="ld-pen">✏️</span> +1 Speed Kart Escape <span className="ld-check">✓</span>
+          </div>
+          <div className="ld-sub">User Created Game</div>
+          {error ? (
+            <div className="ld-err">Could not start the game: {error}</div>
+          ) : (
+            <div className="ld-dots">
+              <i />
+              <i />
+              <i />
+            </div>
+          )}
         </div>
-        {error ? <div className="err">Could not start the game: {error}</div> : <div className="spin" />}
+        <div className="ld-status">{error ? '' : `${loading.text} ${Math.round(loading.progress * 100)}%`}</div>
       </div>
     </>
   );

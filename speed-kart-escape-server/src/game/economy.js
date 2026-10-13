@@ -55,6 +55,7 @@ const ALLOWED_ACTIONS = new Set([
   'rebirth',
   'claimChest',
   'claimPlaytime',
+  'claimAway',
   'upgradeBoost',
   'claimQuest',
   'buyKart',

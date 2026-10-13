@@ -1,5 +1,20 @@
-// Small procedural sound kit (no audio files): kart engine hum, pickup pops,
-// level-up chime and UI clicks. Starts on the first user gesture.
+// Procedural audio (no audio files): two background music tracks that take turns,
+// kart engine, and sound effects. Starts on the first user gesture (browser rule).
+//
+// Music rotation: "Fresh Sax" -> "Turbo Race" -> "Classical", 2 min each with
+// 10 s of silence between them, repeating. Music dips quietly whenever a sound effect plays.
+
+import { MusicPlayer } from './Music.js';
+
+function hallImpulse(ctx, seconds) {
+  const len = Math.floor(ctx.sampleRate * seconds);
+  const buf = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+  }
+  return buf;
+}
 
 class SfxEngine {
   constructor() {
@@ -8,6 +23,8 @@ class SfxEngine {
     this.engine = null;
     this.volume = 0.6;
     this.muted = false;
+    this.musicOn = true;
+    this.lastClick = 0;
     const unlock = () => {
       this.ensure();
       window.removeEventListener('pointerdown', unlock);
@@ -15,6 +32,10 @@ class SfxEngine {
     };
     window.addEventListener('pointerdown', unlock);
     window.addEventListener('keydown', unlock);
+    // Every button press makes a water-drop "bloop".
+    document.addEventListener('pointerdown', (e) => {
+      if (e.target?.closest?.('button')) this.click();
+    });
   }
 
   ensure() {
@@ -28,8 +49,59 @@ class SfxEngine {
     this.master = this.ctx.createGain();
     this.master.gain.value = this.muted ? 0 : this.volume;
     this.master.connect(this.ctx.destination);
+    this.sfxBus = this.ctx.createGain();
+    this.sfxBus.connect(this.master);
+    this.musicBus = this.ctx.createGain();
+    this.musicBus.gain.value = this.musicOn ? 0.55 : 0;
+    this.musicBus.connect(this.master);
+    // polish: gentle compression + a soft hall reverb on the music
+    const comp = this.ctx.createDynamicsCompressor();
+    comp.threshold.value = -20;
+    comp.ratio.value = 3;
+    const verb = this.ctx.createConvolver();
+    verb.buffer = hallImpulse(this.ctx, 2.4);
+    const wet = this.ctx.createGain();
+    wet.gain.value = 0.32;
+    const musicIn = this.ctx.createGain();
+    musicIn.connect(comp);
+    musicIn.connect(verb);
+    verb.connect(wet);
+    wet.connect(comp);
+    comp.connect(this.musicBus);
+    this.music = new MusicPlayer(this.ctx, musicIn);
+    this.music.start();
+    this.tryMusicFiles(musicIn);
     this.startEngine();
     return true;
+  }
+
+  // If real music files are added to public/music/ (1.mp3, 2.mp3, 3.mp3 …) they are
+  // played instead of the built-in music, taking turns with 10 s of silence between.
+  async tryMusicFiles(out) {
+    const buffers = [];
+    for (let i = 1; i <= 6; i++) {
+      try {
+        const res = await fetch(`./music/${i}.mp3`);
+        if (!res.ok || !(res.headers.get('content-type') || '').includes('audio')) break;
+        buffers.push(await this.ctx.decodeAudioData(await res.arrayBuffer()));
+      } catch {
+        break;
+      }
+    }
+    if (!buffers.length) return;
+    this.music.stop();
+    let i = 0;
+    const play = () => {
+      const src = this.ctx.createBufferSource();
+      src.buffer = buffers[i % buffers.length];
+      src.connect(out);
+      src.onended = () => {
+        i++;
+        setTimeout(play, 10_000);
+      };
+      src.start();
+    };
+    play();
   }
 
   setVolume(v) {
@@ -42,64 +114,147 @@ class SfxEngine {
     this.setVolume(this.volume);
   }
 
+  setMusic(on) {
+    this.musicOn = on;
+    if (this.musicBus) this.musicBus.gain.setTargetAtTime(on ? 0.55 : 0, this.ctx.currentTime, 0.1);
+  }
+
+  // Lower the music briefly so sound effects stand out.
+  duck(len = 0.6) {
+    if (!this.musicBus || !this.musicOn) return;
+    const g = this.musicBus.gain;
+    const t = this.ctx.currentTime;
+    g.cancelScheduledValues(t);
+    g.setTargetAtTime(0.2, t, 0.04);
+    g.setTargetAtTime(0.55, t + len, 0.35);
+  }
+
+  // Racing engine: a smooth, rising "whine" that revs up through the gears like a
+  // race car (pitch climbs, drops a little on each gear change, climbs again).
+  // Soft filtering keeps it easy on the ears.
   startEngine() {
     const c = this.ctx;
     const osc = c.createOscillator();
     osc.type = 'sawtooth';
-    const sub = c.createOscillator();
-    sub.type = 'square';
+    const harm = c.createOscillator();
+    harm.type = 'triangle';
     const filter = c.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.value = 400;
+    filter.Q.value = 0.5;
+    filter.frequency.value = 600;
+    const harmGain = c.createGain();
+    harmGain.gain.value = 0.5;
+    const vib = c.createOscillator();
+    vib.frequency.value = 6;
+    const vibAmt = c.createGain();
+    vibAmt.gain.value = 1.5;
+    vib.connect(vibAmt);
+    vibAmt.connect(osc.frequency);
     const gain = c.createGain();
     gain.gain.value = 0;
     osc.connect(filter);
-    sub.connect(filter);
+    harm.connect(harmGain);
+    harmGain.connect(filter);
     filter.connect(gain);
-    gain.connect(this.master);
-    osc.start();
-    sub.start();
-    this.engine = { osc, sub, filter, gain };
+    gain.connect(this.sfxBus);
+    for (const n of [osc, harm, vib]) n.start();
+    this.engine = { osc, harm, filter, gain, wasOn: false };
   }
 
-  // speed01: 0..1 of the kart's top speed; throttle: is the player pressing gas
+  // speed01: 0..1 of the kart's top speed; throttle: is the player driving
   updateEngine(speed01, throttle) {
     if (!this.engine) return;
+    const e = this.engine;
     const t = this.ctx.currentTime;
-    const f = 48 + speed01 * 120 + (throttle ? 12 : 0);
-    this.engine.osc.frequency.setTargetAtTime(f, t, 0.08);
-    this.engine.sub.frequency.setTargetAtTime(f / 2, t, 0.08);
-    this.engine.filter.frequency.setTargetAtTime(300 + speed01 * 1300, t, 0.1);
-    this.engine.gain.gain.setTargetAtTime(0.035 + speed01 * 0.05, t, 0.15);
+    // three gears: the pitch rises through each, then dips at the shift
+    const g = Math.min(2.999, speed01 * 3);
+    const gear = Math.floor(g);
+    const rev = g - gear;
+    const f = speed01 > 0.02 ? 85 + gear * 22 + rev * 120 + (throttle ? 6 : 0) : 70;
+    e.osc.frequency.setTargetAtTime(f, t, 0.06);
+    e.harm.frequency.setTargetAtTime(f * 2, t, 0.06);
+    e.filter.frequency.setTargetAtTime(f * 3.2, t, 0.08);
+    e.gain.gain.setTargetAtTime(speed01 > 0.02 ? 0.025 + speed01 * 0.02 : 0.01, t, 0.15); // quieter engine
+    const on = speed01 > 0.05;
+    if (on !== e.wasOn && this.musicBus && this.musicOn) {
+      this.musicBus.gain.setTargetAtTime(on ? 0.4 : 0.55, t, 0.4);
+      e.wasOn = on;
+    }
+  }
+
+  tone(freq, start, dur, { type = 'sine', vol = 0.25, slide = 1, attack = 0.005 } = {}) {
+    const c = this.ctx;
+    const o = c.createOscillator();
+    const g = c.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, start);
+    if (slide !== 1) o.frequency.exponentialRampToValueAtTime(freq * slide, start + dur);
+    g.gain.setValueAtTime(0.0001, start);
+    g.gain.exponentialRampToValueAtTime(vol, start + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+    o.connect(g);
+    g.connect(this.sfxBus);
+    o.start(start);
+    o.stop(start + dur + 0.05);
   }
 
   blip(freq, dur = 0.12, type = 'sine', vol = 0.25, slide = 1.5) {
     if (!this.ensure()) return;
-    const c = this.ctx;
-    const t = c.currentTime;
-    const o = c.createOscillator();
-    const g = c.createGain();
-    o.type = type;
-    o.frequency.setValueAtTime(freq, t);
-    o.frequency.exponentialRampToValueAtTime(freq * slide, t + dur);
-    g.gain.setValueAtTime(vol, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(g);
-    g.connect(this.master);
-    o.start(t);
-    o.stop(t + dur + 0.02);
+    this.tone(freq, this.ctx.currentTime, dur, { type, vol, slide });
+  }
+
+  // Water drop: a quick upward "bloop".
+  click() {
+    const now = performance.now();
+    if (now - this.lastClick < 70 || !this.ensure()) return;
+    this.lastClick = now;
+    const t = this.ctx.currentTime;
+    this.tone(420, t, 0.09, { vol: 0.28, slide: 3.2 });
+    this.tone(1300, t + 0.05, 0.05, { vol: 0.08, slide: 1.4 });
+    this.duck(0.3);
   }
 
   pop() {
-    this.blip(660 + Math.random() * 120, 0.09, 'triangle', 0.12, 1.8);
+    this.blip(660 + Math.random() * 120, 0.09, 'triangle', 0.1, 1.8);
   }
 
-  click() {
-    this.blip(520, 0.06, 'square', 0.08, 1.2);
+  // Coin pickup: bright two-note "ka-ching" with a sparkle.
+  coin() {
+    if (!this.ensure()) return;
+    const t = this.ctx.currentTime;
+    this.tone(988, t, 0.09, { type: 'square', vol: 0.09 });
+    this.tone(1319, t + 0.07, 0.28, { type: 'square', vol: 0.09 });
+    this.tone(2637, t + 0.07, 0.3, { vol: 0.05 });
+    this.duck(0.5);
+  }
+
+  // Trophy / stage win: rising fanfare with a shimmering final chord.
+  trophy() {
+    if (!this.ensure()) return;
+    const t = this.ctx.currentTime;
+    [523, 659, 784, 1047].forEach((f, i) => this.tone(f, t + i * 0.1, 0.22, { type: 'triangle', vol: 0.18 }));
+    for (const f of [1047, 1319, 1568, 2093]) this.tone(f, t + 0.45, 1.1, { type: 'triangle', vol: 0.09, attack: 0.02 });
+    for (let i = 0; i < 6; i++) this.tone(2600 + i * 300, t + 0.5 + i * 0.07, 0.15, { vol: 0.05 });
+    this.duck(1.8);
   }
 
   levelUp() {
-    [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => this.blip(f, 0.18, 'triangle', 0.2, 1.01), i * 90));
+    if (!this.ensure()) return;
+    const t = this.ctx.currentTime;
+    [523, 659, 784, 1046].forEach((f, i) => this.tone(f, t + i * 0.09, 0.18, { type: 'triangle', vol: 0.2 }));
+    this.duck(0.8);
+  }
+
+  // Crash / fall: a soft "bonk", a cartoon slide-whistle drop and a gentle low thud.
+  dead() {
+    if (!this.ensure()) return;
+    const t = this.ctx.currentTime;
+    this.tone(180, t, 0.12, { type: 'triangle', vol: 0.22, slide: 0.6 });
+    this.tone(880, t + 0.08, 0.75, { vol: 0.14, slide: 0.25, attack: 0.02 });
+    this.tone(1320, t + 0.08, 0.75, { vol: 0.04, slide: 0.25, attack: 0.02 });
+    this.tone(90, t + 0.8, 0.35, { vol: 0.25, slide: 0.6 });
+    [392, 370, 349, 330].forEach((f, i) => this.tone(f, t + 1.0 + i * 0.16, 0.22, { type: 'triangle', vol: 0.09 }));
+    this.duck(1.8);
   }
 
   error() {
@@ -107,7 +262,10 @@ class SfxEngine {
   }
 
   reward() {
-    [784, 988, 1175].forEach((f, i) => setTimeout(() => this.blip(f, 0.16, 'sine', 0.22, 1.02), i * 70));
+    if (!this.ensure()) return;
+    const t = this.ctx.currentTime;
+    [784, 988, 1175].forEach((f, i) => this.tone(f, t + i * 0.07, 0.16, { vol: 0.22 }));
+    this.duck(0.6);
   }
 }
 

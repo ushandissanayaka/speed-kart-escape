@@ -3,7 +3,7 @@ import { StartingPlaceState, PlayerState } from './schema.js';
 import { readSession } from '../auth/legionAuth.js';
 import { getRecord, scheduleSave, computeLeaderboards } from '../game/profiles.js';
 import { clampToBounds, driveGain, isJump, runAction, treadmillTick, validatedDistance } from '../game/economy.js';
-import { WORLD, allowedTeleport, applyStageAction, newProfile, newRun, publicSummary, refreshDaily, trackStage } from '../shared/gameData.js';
+import { WORLD, computeAway, allowedTeleport, applyStageAction, newProfile, newRun, publicSummary, refreshDaily, trackStage } from '../shared/gameData.js';
 
 const LEADERBOARD_INTERVAL_MS = 15_000;
 const MAX_AVATAR_JSON = 4000;
@@ -57,6 +57,13 @@ export class StartingPlaceRoom extends Room {
     const record = auth.isGuest ? { name: auth.name, avatar: null, profile: newProfile() } : getRecord(auth.legionId, auth.name);
     client.userData = { auth, record, pos: null, lastMoveAt: 0, dirty: false, playtime: { start: Date.now(), claimed: new Set() }, run: newRun() };
     refreshDaily(record.profile);
+    if (auth.isGuest) {
+      // Guests aren't saved on the server: use the last-seen time their browser kept
+      // (the 8-hour cap in computeAway limits what this can be worth).
+      const seen = Number(options?.lastSeen);
+      if (Number.isFinite(seen) && seen > 0 && seen < Date.now()) record.profile.lastSeen = seen;
+    }
+    computeAway(record.profile);
     if (auth.legionId) online.set(auth.legionId, { room: this, client });
 
     const ps = new PlayerState();

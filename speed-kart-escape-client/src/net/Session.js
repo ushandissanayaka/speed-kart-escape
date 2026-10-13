@@ -14,6 +14,7 @@ import {
   allowedTeleport,
   applyStageAction,
   refreshDaily,
+  computeAway,
   canUseTreadmill,
   normalizeProfile,
   publicSummary,
@@ -59,7 +60,14 @@ export class OnlineSession extends Emitter {
       sessionToken = res?.sessionToken || null;
       if (!sessionToken) console.warn('[net] Bloxity handshake failed — joining as guest');
     }
-    this.joinOptions = { sessionToken, guestName: identity.displayName || identity.username };
+    let lastSeen = 0;
+    try {
+      lastSeen = Number(localStorage.getItem('ske_last_seen')) || 0;
+      if (!lastSeen) localStorage.setItem('ske_last_seen', String(Date.now())); // first visit
+    } catch {
+      /* storage unavailable */
+    }
+    this.joinOptions = { sessionToken, guestName: identity.displayName || identity.username, lastSeen };
     await this.join();
   }
 
@@ -161,6 +169,7 @@ export class OfflineSession extends Emitter {
     }
     this.profile = normalizeProfile(saved);
     refreshDaily(this.profile);
+    computeAway(this.profile);
     this.playtime = { start: Date.now(), claimed: new Set() };
     this.run = newRun();
   }
@@ -214,6 +223,7 @@ export class OfflineSession extends Emitter {
   }
 
   tickSecond() {
+    if ((this.ticks = (this.ticks || 0) + 1) % 30 === 0) this.save();
     const t = treadmillAt(this.pos.x, this.pos.z);
     if (t) {
       if (!canUseTreadmill(this.profile, t)) this.emit('treadmillLocked', { id: t.id, message: treadmillLockText(t) });
