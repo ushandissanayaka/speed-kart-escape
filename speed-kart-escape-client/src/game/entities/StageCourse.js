@@ -276,10 +276,12 @@ export class StageCourse {
     sign.position.set(-HW + 16, 4, s.startZ - 70);
     sign.rotation.y = 0.5;
     this.root.add(sign);
+    this.collision.addBox(sign.position.x, sign.position.z, 30, 3, 0.5);
     const scr = makeVideoScreen();
     scr.position.set(HW - 16, 4, s.startZ - 150);
     scr.rotation.y = -0.5;
     this.root.add(scr);
+    this.collision.addBox(scr.position.x, scr.position.z, 24, 2, -0.5);
 
     // Swinging log bars: count and speed rise with the stage
     const spin = { 1: [[0, 110, 0.55]], 2: [[-22, 140, 0.8], [18, 240, -0.9]], 3: [[0, 70, 1.1], [0, 280, -1.2]] }[s.n];
@@ -742,6 +744,7 @@ export class StageCourse {
       shard.position.set(((i * 37) % 110) - 55, 0.4, s.startZ - 40 - ((i * 53) % (s.len - 90)));
       shard.rotation.set(i, i * 2, i * 3);
       this.root.add(shard);
+      this.collision.addCircle(shard.position.x, shard.position.z, 1.8);
     }
   }
 
@@ -750,7 +753,10 @@ export class StageCourse {
     this.floor(s, BRICK);
     // inner pillars along the walls (the blue panelled corridor look)
     for (let i = 0; i < 12; i++) {
-      for (const sx of [-1, 1]) this.add(studBox(4, 30, 8, '#5a7ad6', { unit: 6, cells: 4, style: 'dot' }), sx * (HW - 1), 15, s.startZ - 15 - i * (s.len / 12));
+      for (const sx of [-1, 1]) {
+        this.add(studBox(4, 30, 8, '#5a7ad6', { unit: 6, cells: 4, style: 'dot' }), sx * (HW - 1), 15, s.startZ - 15 - i * (s.len / 12));
+        this.collision.addBox(sx * (HW - 1), s.startZ - 15 - i * (s.len / 12), 4, 8);
+      }
     }
     const walls = [
       [60, 0.6, 0],
@@ -788,6 +794,7 @@ export class StageCourse {
         g.add(arm);
         g.position.set(sx * (HW - 5), 0, s.startZ - 20 - i * (s.len / 8));
         this.root.add(g);
+        this.collision.addCircle(g.position.x, g.position.z, 2.2);
       }
     }
   }
@@ -939,6 +946,8 @@ export class StageCourse {
     safe.position.set(pads.safe.x, 0, pads.safe.z);
     safe.rotation.y = 0.5;
     safe.scale.setScalar(2.2);
+    // solid: karts bump into the safe instead of driving through it
+    this.collision.addBox(pads.safe.x, pads.safe.z, 6 * 2.2, 5 * 2.2, 0.5);
     this.root.add(safe);
     const ring = new THREE.Mesh(new THREE.RingGeometry(10, 14, 40), new THREE.MeshBasicMaterial({ color: '#ffe23a', transparent: true, opacity: 0.6, side: THREE.DoubleSide, toneMapped: false }));
     ring.rotation.x = -Math.PI / 2;

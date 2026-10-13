@@ -12,6 +12,7 @@ export class Racer {
     this.scene = scene;
     this.root = new THREE.Group();
     this.kart = new Kart(kart);
+    this.kart.root.scale.setScalar(0.72); // smaller kart (avatar scales with it)
     this.root.add(this.kart.root);
     this.avatar = new BloxityAvatar();
     this.avatar.root.position.set(0, SEAT.y, SEAT.z);
@@ -33,7 +34,7 @@ export class Racer {
   setName(name) {
     if (this.nameTag) this.root.remove(this.nameTag);
     this.nameTag = textSprite([{ text: name, size: 56, font: FONTS.fredoka, fill: '#ffffff', stroke: '#141833', strokeWidth: 9 }], 1.9);
-    this.nameTag.position.set(0, 10.2, SEAT.z);
+    this.nameTag.position.set(0, 8, SEAT.z * 0.72);
     this.root.add(this.nameTag);
   }
 
@@ -78,9 +79,10 @@ export class Racer {
     const targetTilt = -steer * speed01 * 0.08;
     this.tilt += (targetTilt - this.tilt) * Math.min(1, dt * 6);
     this.kart.body.rotation.z = this.tilt;
-    this.kart.body.rotation.x += (-accel * 0.0025 - this.kart.body.rotation.x) * Math.min(1, dt * 5);
+    const pitch = Math.max(-0.04, Math.min(0.04, -accel * 0.0004)); // small, capped squat
+    this.kart.body.rotation.x += (pitch - this.kart.body.rotation.x) * Math.min(1, dt * 4);
     this.bounce += dt * (8 + speed01 * 20);
-    this.kart.body.position.y = speed01 > 0.05 ? Math.sin(this.bounce) * 0.06 * speed01 : 0;
+    this.kart.body.position.y = speed01 > 0.05 ? Math.sin(this.bounce) * 0.025 * speed01 : 0;
 
     // Trail emitter behind the rear wheels
     this.emitter.set(0, 1.2, -7.5).applyMatrix4(this.root.matrixWorld);
