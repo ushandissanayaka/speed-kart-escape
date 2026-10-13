@@ -21,6 +21,32 @@ Fonts are **Fredoka One** and **Montserrat**.
 
 The player is the **Bloxity base character** (`player.glb` from the Bloxity CDN) with their equipped skin and accessories, seated in a kart.
 
+## Stages
+
+Six stages behind the Stage 1 gate, rebuilt from the reference recordings:
+
+| Stage | Look | Obstacles | Wins at the end |
+|---|---|---|---|
+| 1 | Navy road between grass | Swinging logs | +1 |
+| 2 | Winding road | More, faster logs | +2 |
+| 3 | Grass islands | Logs plus sliding logs | +8 |
+| 4 | Brick desert | Red spike fields with one gap | +20 |
+| 5 | Lava | Only the raised brick paths are safe | +50 |
+| 6 | Blue corridor | Sliding red walls and cyan orbs | +100 |
+
+Each stage ends at a gate with three things in front of it:
+
+- **Skip Stage pad** (purple): skips the next stage for Gems.
+- **+Wins / Return pad** (yellow): takes the reward and goes back to the spawn.
+- **Coin safe:** 250 coins every 10 minutes.
+
+Crashing into an obstacle opens **Teleport Back?**, a 5-second countdown with two options. Either way you get a short shield afterwards.
+
+- **Buy for 9 Gems:** carry on from where you crashed.
+- **Respawn Now:** go back to the start of the stage right away.
+
+Global **2x COINS** and **2x SPEED** events run on a 20-minute cycle and show a timer at the top of the screen. Kart speed and the Custom Speed maximum grow with your level (Level 10 = 30).
+
 ## Run locally
 
 ```bash

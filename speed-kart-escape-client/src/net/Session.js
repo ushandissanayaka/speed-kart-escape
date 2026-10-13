@@ -9,6 +9,10 @@ import {
   applyDrive,
   applyTreadmillSecond,
   mergeLeaderboard,
+  newRun,
+  trackStage,
+  allowedTeleport,
+  applyStageAction,
   refreshDaily,
   canUseTreadmill,
   normalizeProfile,
@@ -82,6 +86,7 @@ export class OnlineSession extends Emitter {
     room.onMessage('toast', (m) => this.emit('toast', m));
     room.onMessage('actionResult', (m) => this.emit('actionResult', m));
     room.onMessage('leaderboards', (m) => this.emit('leaderboards', m));
+    room.onMessage('stageResult', (m) => this.emit('stageResult', m));
     room.onMessage('treadmillLocked', (m) => this.emit('treadmillLocked', m));
 
     const players = room.state.players;
@@ -125,6 +130,9 @@ export class OnlineSession extends Emitter {
   setAvatar(json) {
     this.room?.send('avatar', { json });
   }
+  stage(a) {
+    this.room?.send('stage', a);
+  }
   sync() {
     this.room?.send('sync');
   }
@@ -154,6 +162,7 @@ export class OfflineSession extends Emitter {
     this.profile = normalizeProfile(saved);
     refreshDaily(this.profile);
     this.playtime = { start: Date.now(), claimed: new Set() };
+    this.run = newRun();
   }
 
   async connect(identity) {
@@ -188,6 +197,9 @@ export class OfflineSession extends Emitter {
 
   sendMove(x, z) {
     const next = { x, z };
+    const jumped = !this.prev || Math.hypot(x - this.prev.x, z - this.prev.z) > 40;
+    if (jumped && this.prev && !allowedTeleport(this.run, next)) this.run = newRun();
+    trackStage(this.run, next, Date.now(), jumped);
     if (this.prev) {
       const dist = Math.min(Math.hypot(x - this.prev.x, z - this.prev.z), 30);
       const { gained, events } = applyDrive(this.profile, dist, Date.now());
@@ -236,6 +248,14 @@ export class OfflineSession extends Emitter {
   }
 
   setAvatar() {}
+  stage(a) {
+    const res = applyStageAction(this.profile, this.run, a, this.pos, Date.now());
+    this.emit('stageResult', { type: a.type, id: a.id, ...res });
+    if (res.ok) {
+      this.pushProfile();
+      this.pushLeaderboards();
+    }
+  }
   sync() {
     this.pushProfile();
   }

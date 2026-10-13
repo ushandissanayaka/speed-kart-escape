@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { StartingPlace } from './scenes/StartingPlace.js';
 import { Racer } from './entities/Racer.js';
+import { Confetti } from './entities/Confetti.js';
 import { KartController } from './systems/KartController.js';
 import { CameraRig } from './systems/CameraRig.js';
 import { Input } from './systems/Input.js';
@@ -13,7 +14,25 @@ import { renderKartThumbs } from './util/kartThumbs.js';
 import { sfx } from './audio/Sfx.js';
 import { Emitter, openSession } from '../net/Session.js';
 import * as legion from '../bloxity/legion.js';
-import { TREADMILLS, TUNING, WORLD, chestReady, formatClock, newProfile } from '../shared/gameData.js';
+import {
+  STAGE_COIN_COOLDOWN_MS,
+  TREADMILLS,
+  TUNING,
+  WORLD,
+  activeEvent,
+  chestReady,
+  formatClock,
+  kartSpeedFor,
+  merchantStatus,
+  newProfile,
+  stageAt,
+  stageHW,
+  stagePads,
+  stageRespawn,
+} from '../shared/gameData.js';
+
+const DEATH_WAIT_MS = 5000;
+const SHIELD_MS = 3000;
 
 const MOVE_SEND_MS = 100;
 
@@ -23,6 +42,11 @@ export class Game {
     this.events = new Emitter();
     this.profile = newProfile();
     this.playtime = { start: Date.now(), claimed: new Set() };
+    this.stage = 0;
+    this.dead = null;
+    this.shieldUntil = 0;
+    this.eventId = undefined;
+    this.merchantHere = undefined;
     this.serverOffset = 0;
     this.remotes = new Map();
     this.zones = {};
@@ -58,8 +82,9 @@ export class Game {
     this.world = new StartingPlace(this.scene);
     this.input = new Input();
     this.rig = new CameraRig(this.camera, renderer.domElement);
-    this.rig.bounds = { minX: -193, maxX: 193, minZ: -240, maxZ: 54.5 };
+    this.rig.bounds = { minX: -193, maxX: 193, minZ: -2600, maxZ: 54.5 };
     this.controller = new KartController(this.world.collision);
+    this.confetti = new Confetti(this.scene);
 
     // Local player
     legion.loadingStep('Signing in…');
@@ -130,10 +155,11 @@ export class Game {
     s.on('event', (e) => {
       if (e.type === 'levelUp') {
         sfx.levelUp();
-        this.events.emit('toast', { text: `Level Up! You are now Level ${e.level}`, kind: 'level' });
+        this.events.emit('levelPopup', { level: e.level, from: kartSpeedFor(e.level - 1), to: kartSpeedFor(e.level) });
       }
     });
     s.on('toast', (t) => this.events.emit('toast', t));
+    s.on('stageResult', (r) => this.onStageResult(r));
     s.on('actionResult', (r) => {
       if (r.ok) {
         if (r.toast) {
@@ -210,8 +236,14 @@ export class Game {
     this.session?.action(a);
   }
 
-  async purchase(sku) {
+  // Opens the Legion-style purchase popup; resolves with the purchase result.
+  purchase(sku) {
     sfx.click();
+    return new Promise((resolve) => this.events.emit('purchasePrompt', { sku, resolve }));
+  }
+
+  // Called by the popup's Buy button: hands the purchase to the Bloxity SDK.
+  async confirmPurchase(sku) {
     const res = await legion.requestPurchase(sku, this.identity?._id);
     if (res?.success) {
       this.events.emit('toast', { text: 'Purchase complete!', kind: 'good' });
@@ -223,6 +255,10 @@ export class Game {
   }
 
   // Thumbstick, screen space (x right, y down), -1..1
+  setJump(on) {
+    this.input.jumpPressed = on;
+  }
+
   setStick(x, y, active) {
     this.input.setStick(x, y, active);
   }
@@ -236,11 +272,153 @@ export class Game {
   }
 
   respawn() {
-    const s = WORLD.spawn;
-    this.controller.place(s.x, s.z, s.ry);
-    this.player.root.position.set(s.x, this.controller.y, s.z);
-    this.player.root.rotation.y = s.ry;
-    this.rig.snap(this.player.root.position, s.ry);
+    this.dead = null;
+    this.events.emit('deathEnd');
+    this.teleport(WORLD.spawn);
+    this.stage = 0;
+  }
+
+  teleport({ x, z, ry = Math.PI }) {
+    this.controller.place(x, z, ry);
+    this.player.root.position.set(x, this.controller.y, z);
+    this.player.root.rotation.y = ry;
+    this.rig.snap(this.player.root.position, ry);
+    this.session?.sendMove(x, z, ry, 0);
+    this.lastSend = performance.now();
+  }
+
+  // --- stages --------------------------------------------------------------
+
+  die(cause) {
+    if (this.dead) return;
+    sfx.error();
+    // Logs knock you all the way back to the starting place.
+    const toSpawn = cause === 'beam' || cause === 'spike';
+    this.dead = { until: performance.now() + DEATH_WAIT_MS, stage: Math.max(1, this.stage), cause, toSpawn };
+    this.controller.v = 0;
+    this.events.emit('death', { ms: DEATH_WAIT_MS, until: this.dead.until, toSpawn });
+  }
+
+  // Countdown ended (or "Respawn now"): back to the start of the current stage.
+  finishDeath() {
+    if (!this.dead) return;
+    const n = this.dead.stage;
+    const toSpawn = this.dead.toSpawn;
+    this.dead = null;
+    this.events.emit('deathEnd');
+    if (toSpawn) {
+      this.respawn();
+      return;
+    }
+    this.teleport(stageRespawn(n));
+    this.shieldUntil = performance.now() + SHIELD_MS;
+  }
+
+  // Paid revive: keep going from where you are, protected by the shield.
+  async reviveHere() {
+    if (!this.dead) return;
+    const res = await this.purchase('revive');
+    if (res?.success && this.dead) {
+      this.dead = null;
+      this.events.emit('deathEnd');
+      this.shieldUntil = performance.now() + SHIELD_MS * 1.5;
+    }
+  }
+
+  stageAction(a) {
+    this.session?.stage(a);
+  }
+
+  async onStageResult(r) {
+    if (r.type === 'collectCoin') {
+      if (r.ok && r.coins) {
+        const p = this.screenPoint(this.player.root.position, 8);
+        this.events.emit('gain', { amount: r.coins, kind: 'coin', x: p.x, y: p.y });
+      }
+      return;
+    }
+    if (r.type === 'useSkip' && r.error === 'NEED_SKIP') {
+      const res = await this.purchase('skip_stage');
+      if (res?.success) setTimeout(() => this.stageAction({ type: 'useSkip', stage: this.stage }), 400);
+      return;
+    }
+    if (!r.ok) {
+      if (r.error) this.events.emit('toast', { text: r.error, kind: 'bad' });
+      return;
+    }
+    sfx.reward();
+    if (r.toast) this.events.emit('toast', { text: r.toast, kind: 'good' });
+    if (r.teleport === 'spawn') {
+      // Trophy + confetti burst, then back to the starting place.
+      this.events.emit('win', { text: r.toast });
+      this.confetti?.burst(this.player.root.position);
+      this.controller.v = 0;
+      this.celebrating = true;
+      setTimeout(() => {
+        this.celebrating = false;
+        this.respawn();
+      }, 2400);
+    } else if (r.teleport) {
+      this.teleport(r.teleport);
+      this.shieldUntil = performance.now() + SHIELD_MS;
+    }
+  }
+
+  updateStages(now) {
+    const c = this.controller;
+    const s = stageAt(c.z);
+    if (s > this.stage) this.events.emit('stage', { name: `Stage ${s}` });
+    if (s !== this.stage) this.stage = s;
+
+    // Hazards (skipped while dead or shielded)
+    const shielded = performance.now() < (this.shieldUntil || 0);
+    this.player.setShield(shielded);
+    if (this.dead) {
+      if (performance.now() >= this.dead.until) this.finishDeath();
+    } else if (s > 0 && !shielded) {
+      const hit = this.world.course.hazardAt(c.x, c.z, this.world.collision.heightAt(c.x, c.z), now, c.jumpY);
+      if (hit) this.die(hit);
+    }
+
+    // Coins
+    for (const coin of this.world.course.coins) {
+      if (now < coin.hiddenUntil || coin.def.stage !== s) continue;
+      if (Math.hypot(c.x - coin.def.x, c.z - coin.def.z) < 7) {
+        coin.hiddenUntil = now + STAGE_COIN_COOLDOWN_MS;
+        sfx.pop();
+        this.stageAction({ type: 'collectCoin', id: coin.def.id });
+      }
+    }
+
+    // Pads in front of the gate at the end of this stage
+    if (s > 0 && !this.dead) {
+      const pads = stagePads(s);
+      const inPad = (pt) => Math.hypot(c.x - pt.x, c.z - pt.z) <= pt.r;
+      this.enterZone(`wins-${s}`, inPad(pads.wins), () => this.stageAction({ type: 'stageWin', stage: s }));
+      this.enterZone(`skip-${s}`, inPad(pads.skip), () => this.stageAction({ type: 'useSkip', stage: s }));
+      this.enterZone(`safe-${s}`, inPad(pads.safe), () => this.stageAction({ type: 'openSafe', stage: s }));
+    }
+
+    // Keep the camera inside the narrow stage walls
+    const b = this.rig.bounds;
+    const hw = c.z < -130 ? stageHW(Math.max(1, s)) + 2 : 193;
+    b.minX = -hw;
+    b.maxX = hw;
+  }
+
+  // Global events + merchant arrival notices
+  updateNotices(now) {
+    const e = activeEvent(now);
+    const id = e?.id || null;
+    if (id !== this.eventId) {
+      if (id) this.events.emit('notice', { kind: id, title: e.title, desc: e.desc });
+      this.eventId = id;
+    }
+    const m = merchantStatus(now);
+    if (m.present && this.merchantHere === false) {
+      this.events.emit('notice', { kind: 'merchant', title: 'THE MERCHANT HAS ARRIVED', desc: `Leaves in ${formatClock(m.msLeft)}` });
+    }
+    this.merchantHere = m.present;
   }
 
   // --- loop ----------------------------------------------------------------
@@ -250,14 +428,14 @@ export class Game {
     const now = this.now();
     const p = this.profile;
 
-    this.controller.setStats(p.speed, p.kart, p.customSpeed);
-    const input = this.input.read();
-    this.controller.update(dt, input, this.rig.forward());
+    this.controller.setStats(p.speed, p.kart, p.customSpeed, p.level);
+    const input = this.dead || this.celebrating ? { x: 0, y: 0 } : this.input.read();
+    this.controller.update(dt, input, this.rig.forward(), input.jump);
     const c = this.controller;
-    this.player.root.position.set(c.x, c.y, c.z);
+    this.player.root.position.set(c.x, c.y + c.jumpY, c.z);
     this.player.root.rotation.y = c.ry;
     this.player.root.updateMatrixWorld();
-    this.player.animate(dt, c.v, c.steer, c.accel, c.topSpeed);
+    this.player.animate(dt, c.v, c.steer, c.accel, c.topSpeed, c.jumpY > 0.4);
 
     for (const r of this.remotes.values()) {
       const root = r.racer.root;
@@ -277,7 +455,10 @@ export class Game {
 
     this.rig.update(dt, this.player.root.position, c.v);
     this.world.update(dt, this.camera, p, now);
+    this.confetti.update(dt);
     this.handleZones(now);
+    this.updateStages(now);
+    this.updateNotices(now);
     sfx.updateEngine(Math.min(1, Math.abs(c.v) / Math.max(c.topSpeed, 1)), c.driving);
 
     if (performance.now() - this.lastSend > MOVE_SEND_MS) {
@@ -304,14 +485,6 @@ export class Game {
       const msg =
         this.profile.rebirths >= TUNING.world2Rebirths ? 'World 2 is coming soon!' : `World 2 requires ${TUNING.world2Rebirths} Rebirths`;
       this.events.emit('toast', { text: msg });
-    });
-    // Stage 1 gate
-    const st = WORLD.stageTrigger;
-    const inStage = x >= st.minX && x <= st.maxX && z >= st.minZ && z <= st.maxZ;
-    this.enterZone('stage', inStage, () => {
-      this.events.emit('stage', { name: 'Stage 1' });
-      this.events.emit('toast', { text: 'Stage 1 is coming soon — keep training your Speed!' });
-      setTimeout(() => this.respawn(), 1400);
     });
   }
 

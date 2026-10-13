@@ -25,10 +25,30 @@ export class Collision {
     this.bounds = b;
   }
 
+  // Sloped ground: height goes from yNear (at maxZ) to yFar (at minZ).
+  addRamp(minX, maxX, minZ, maxZ, yNear, yFar) {
+    (this.ramps ||= []).push({ minX, maxX, minZ, maxZ, yNear, yFar });
+  }
+
+  // Ground whose height is any function of z (curved hills).
+  addCurve(minX, maxX, minZ, maxZ, fn) {
+    (this.curves ||= []).push({ minX, maxX, minZ, maxZ, fn });
+  }
+
   heightAt(x, z) {
     let y = 0;
     for (const h of this.heights) {
       if (x >= h.minX && x <= h.maxX && z >= h.minZ && z <= h.maxZ && h.y > y) y = h.y;
+    }
+    for (const c of this.curves || []) {
+      if (x < c.minX || x > c.maxX || z < c.minZ || z > c.maxZ) continue;
+      const cy = c.fn(z);
+      if (cy > y) y = cy;
+    }
+    for (const r of this.ramps || []) {
+      if (x < r.minX || x > r.maxX || z < r.minZ || z > r.maxZ) continue;
+      const ry = r.yNear + ((r.maxZ - z) / (r.maxZ - r.minZ)) * (r.yFar - r.yNear);
+      if (ry > y) y = ry;
     }
     return y;
   }

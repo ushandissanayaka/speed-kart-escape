@@ -6,6 +6,7 @@ export class Input {
     this.keys = new Set();
     this.stick = { x: 0, y: 0, active: false };
     this.enabled = true;
+    this.jumpPressed = false; // touch Jump button
     this.onKeyDown = (e) => {
       if (isTyping(e)) return;
       this.keys.add(e.code);
@@ -26,13 +27,14 @@ export class Input {
   }
 
   read() {
-    if (!this.enabled) return { x: 0, y: 0 };
-    if (this.stick.active) return { x: clamp(this.stick.x), y: clamp(-this.stick.y) };
+    if (!this.enabled) return { x: 0, y: 0, jump: false };
+    const jump = this.keys.has('Space') || this.jumpPressed;
+    if (this.stick.active) return { x: clamp(this.stick.x), y: clamp(-this.stick.y), jump };
     const k = this.keys;
     const y = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
     const x = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
     const len = Math.hypot(x, y);
-    return len > 1 ? { x: x / len, y: y / len } : { x, y };
+    return len > 1 ? { x: x / len, y: y / len, jump } : { x, y, jump };
   }
 
   dispose() {

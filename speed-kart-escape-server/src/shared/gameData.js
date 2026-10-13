@@ -14,7 +14,7 @@ export const WORLD = {
   plaza: { minX: -160, maxX: 160, minZ: -55, maxZ: 55 },
   corridor: { minX: -30, maxX: 30, minZ: -125, maxZ: -55 },
   spawn: { x: 0, z: 8, ry: Math.PI }, // ry = PI faces the kart north (-Z)
-  bounds: { minX: -192, maxX: 192, minZ: -172, maxZ: 55 },
+  bounds: { minX: -192, maxX: 192, minZ: -2600, maxZ: 55 },
   stageGate: { x: 0, z: -128, width: 60 },
   stageTrigger: { minX: -28, maxX: 28, minZ: -175, maxZ: -150 },
   world2Gate: { x: 96, z: -68, radius: 7 },
@@ -130,6 +130,8 @@ export const GEM_PRODUCTS = {
   wins_25k: { name: '25K WINS', grant: { wins: 25_000 }, displayPrice: 690 },
   wins_100k: { name: '100K WINS', grant: { wins: 100_000 }, displayPrice: 2700 },
   skip_rebirth: { name: 'Skip Rebirth', grant: { rebirth: true }, displayPrice: 49 },
+  skip_stage: { name: 'Skip Stage', grant: { skipStage: 1 }, displayPrice: 29 },
+  revive: { name: 'Teleport Back', grant: {}, displayPrice: 9 },
   boost_speed: { name: 'Speed Boost +0.1', grant: { boostLevel: 'speed' }, displayPrice: 19 },
   boost_coins: { name: 'Coins Boost +0.1', grant: { boostLevel: 'coins' }, displayPrice: 19 },
   boost_wins: { name: 'Wins Boost +0.1', grant: { boostLevel: 'wins' }, displayPrice: 19 },
@@ -137,6 +139,89 @@ export const GEM_PRODUCTS = {
 for (const t of TRAILS) {
   if (t.gems) GEM_PRODUCTS[`trail_${t.id}`] = { name: t.name, grant: { trail: t.id }, displayPrice: t.gems };
 }
+
+// ---------------------------------------------------------------------------
+// Stages (from the reference recordings). The course runs north (-Z) from the
+// Stage 1 gate. Each stage is followed by a gate; in front of every gate sit a
+// purple "Skip Stage" pad (left), a yellow "+N Wins / Return" pad (right) and a
+// 250-coin safe. Taking the wins pad ends the run and returns you to the spawn.
+// ---------------------------------------------------------------------------
+export const COURSE = {
+  startZ: -152, // back face of the Stage 1 gate
+  gateDepth: 24,
+  halfWidth: 60, // drivable half width inside every stage
+};
+export const STAGES = [
+  { n: 1, len: 280, theme: 'grass', wins: 1, hw: 150, coinAmp: 14, coins: 2 }, // one huge open room
+  { n: 2, len: 420, theme: 'grass', wins: 2, hw: 150, coins: 2, coinSpots: [[0, 30], [-90, 140]], rampH: 22 }, // hill road + rolling logs
+  { n: 3, len: 480, theme: 'spikes', wins: 8, hw: 150, coins: 4, coinSpots: [[60, 10], [0, 149], [40, 290], [-40, 440]], wallH: 130, baseY: 22 }, // pop-up spike field
+  { n: 4, len: 320, theme: 'desert', wins: 20, baseY: 22 },
+  { n: 5, len: 340, theme: 'lava', wins: 50, baseY: 22 },
+  { n: 6, len: 360, theme: 'corridor', wins: 100, baseY: 22 },
+];
+// startZ = just past the gate into the stage; endZ = front face of the next gate.
+(() => {
+  let z = COURSE.startZ;
+  for (const s of STAGES) {
+    s.startZ = z;
+    s.endZ = z - s.len;
+    z = s.endZ - COURSE.gateDepth;
+  }
+  COURSE.endZ = z;
+})();
+export const stageDef = (n) => STAGES[n - 1] || null;
+export const stageHW = (n) => stageDef(n)?.hw ?? COURSE.halfWidth;
+
+// Which stage a z position belongs to (the gate after a stage counts as part of it).
+export function stageAt(z) {
+  if (z > COURSE.startZ) return 0;
+  for (const s of STAGES) if (z <= s.startZ && z > s.endZ - COURSE.gateDepth) return s.n;
+  return STAGES.length;
+}
+
+// Pads in front of the gate at the end of stage n.
+export function stagePads(n) {
+  const s = stageDef(n);
+  const z = s.endZ + 14;
+  return {
+    skip: { x: -24, z, r: 7 }, // skips stage n + 1
+    wins: { x: 24, z, r: 7 },
+    safe: { x: -48, z: z + 4, r: 15 },
+  };
+}
+export const stageRespawn = (n) => ({ x: 0, z: stageDef(n).startZ - 14, ry: Math.PI });
+export const stageMinTimeMs = (n) => (stageDef(n).len / 190) * 1000;
+
+// Coins: 9 per stage in a weaving line, same for every player (server validates).
+export const STAGE_COIN_VALUE = 50;
+export const STAGE_COIN_COOLDOWN_MS = 45_000;
+export const SAFE_COINS = 250;
+export const SAFE_COOLDOWN_MS = 10 * 60_000;
+export const STAGE_COINS = STAGES.flatMap((s) =>
+  Array.from({ length: s.coins ?? 9 }, (_, k, n = s.coins ?? 9) => ({
+    id: `s${s.n}c${k}`,
+    stage: s.n,
+    x: s.coinSpots ? s.coinSpots[k][0] : Math.round(Math.sin(k * 1.7 + s.n) * (s.coinAmp ?? 34)),
+    z: s.coinSpots ? s.startZ - s.coinSpots[k][1] : n > 1 ? s.startZ - 70 - (k * (s.len - 140)) / (n - 1) : s.startZ - s.len / 2,
+  }))
+);
+export const coinById = (id) => STAGE_COINS.find((c) => c.id === id) || null;
+
+// Global timed events, identical on every server: 2x Coins, then 2x Speed.
+export const EVENT_CYCLE_MS = 20 * 60_000;
+export const EVENTS = [
+  { id: 'coins', start: 0, dur: 5 * 60_000, label: '2x COINS', title: 'DOUBLE COINS', desc: 'All Coins earned are doubled' },
+  { id: 'speed', start: 10 * 60_000, dur: 5 * 60_000, label: '2x SPEED', title: 'DOUBLE SPEED', desc: 'All Speed earned is doubled' },
+];
+export function activeEvent(now) {
+  const t = now % EVENT_CYCLE_MS;
+  const e = EVENTS.find((x) => t >= x.start && t < x.start + x.dur);
+  return e ? { ...e, msLeft: e.start + e.dur - t } : null;
+}
+
+// Kart speed grows with level (Level 5 -> 20, Level 10 -> 30, Level 25 -> 60) and is
+// also the Custom Speed maximum, like the reference.
+export const kartSpeedFor = (level) => 10 + 2 * level;
 
 // ---------------------------------------------------------------------------
 // Tuning
@@ -147,7 +232,6 @@ export const TUNING = {
   chestCooldownMs: 15 * 60_000,
   merchantCycleMs: 6 * 60_000, // away for 5 min, then here for 1 min
   merchantStayMs: 60_000,
-  customSpeedMax: 20,
   world2Rebirths: 5,
 };
 
@@ -163,11 +247,11 @@ const trailOf = (id) => TRAILS.find((t) => t.id === id) || TRAILS[0];
 
 // Kart velocity in units/second from the Speed stat. Speed grows without bound,
 // so velocity grows logarithmically and is capped.
-export function kartTopVelocity(speed, kartId = 'noob', customSpeed = 0) {
-  let v = 34 + 11 * Math.log10(1 + Math.max(0, speed));
+export function kartTopVelocity(speed, kartId = 'noob', customSpeed = 0, level = 1) {
+  let v = 14 + 2.2 * kartSpeedFor(level) + 3 * Math.log10(1 + Math.max(0, speed));
   v *= 1 + kartOf(kartId).topSpeedBonus;
-  v = Math.min(v, 140);
-  if (customSpeed > 0) v = Math.min(v, 12 + (customSpeed / TUNING.customSpeedMax) * (v - 12));
+  v = Math.min(v, 175);
+  if (customSpeed > 0) v = Math.min(v, 14 + 2.2 * customSpeed);
   return v;
 }
 
@@ -200,9 +284,10 @@ export function newProfile(now = Date.now()) {
     passes: {},
     potions: {},
     speedBoost: { mult: 1, until: 0 },
-    counters: { speedGained: 0, treadmillSeconds: 0, chestsClaimed: 0, levelsGained: 0, coinsWorld2: 0, world2Beaten: 0 },
+    counters: { speedGained: 0, treadmillSeconds: 0, chestsClaimed: 0, levelsGained: 0, coinsWorld2: 0, world2Beaten: 0, stagesBeaten: 0, world1Beaten: 0 },
     daily: { day: dayKey(now), base: {}, claimed: [] },
     lastChestAt: 0,
+    skips: 0,
     transactions: [],
     createdAt: now,
   };
@@ -239,11 +324,13 @@ export function speedMultiplier(p, now = Date.now()) {
   if (p.passes.x2Speed) m *= 2;
   if (potionActive(p, 'speed2x', now)) m *= 2;
   m *= activeSpeedBoost(p, now);
+  if (activeEvent(now)?.id === 'speed') m *= 2;
   return m;
 }
 
 export function coinMultiplier(p, now = Date.now()) {
-  return kartOf(p.kart).coins * boostMult(p.boosts.coins) * (potionActive(p, 'coins2x', now) ? 2 : 1);
+  const event = activeEvent(now)?.id === 'coins' ? 2 : 1;
+  return kartOf(p.kart).coins * boostMult(p.boosts.coins) * (potionActive(p, 'coins2x', now) ? 2 : 1) * event;
 }
 
 function grantCoins(p, amount, now) {
@@ -361,6 +448,7 @@ export function applyGemProduct(p, sku, transactionId, now = Date.now()) {
   if (g.speed) addSpeed(p, g.speed, now, { countsForQuests: false });
   if (g.coins) p.coins += g.coins;
   if (g.wins) p.wins += g.wins;
+  if (g.skipStage) p.skips = (p.skips || 0) + g.skipStage;
   if (g.pass) p.passes[g.pass] = true;
   if (g.rebirth) doRebirth(p);
   if (g.boostLevel) p.boosts[g.boostLevel] = (p.boosts[g.boostLevel] || 0) + 1;
@@ -472,9 +560,85 @@ export function applyAction(p, action, now = Date.now(), session = null) {
     }
     case 'setCustomSpeed': {
       const v = Math.round(Number(action.value));
-      if (!Number.isFinite(v) || v < 0 || v > TUNING.customSpeedMax) return fail(`Pick 0 - ${TUNING.customSpeedMax}`);
+      const max = kartSpeedFor(p.level);
+      if (!Number.isFinite(v) || v < 0 || v > max) return fail(`Pick 0 - ${max}`);
       p.customSpeed = v;
       return { ok: true };
+    }
+    default:
+      return fail('Unknown action');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Stage run actions. `run` is per-connection state the server keeps:
+// { maxStage, enteredAt: {n: ms}, coinAt: {id: ms}, safeAt: {n: ms} } and `pos`
+// is the player's last validated position.
+// ---------------------------------------------------------------------------
+export const newRun = () => ({ maxStage: 0, enteredAt: {}, coinAt: {}, safeAt: {} });
+const near = (pos, pt, r) => pos && Math.hypot(pos.x - pt.x, pos.z - pt.z) <= r;
+
+// Called on every accepted movement. `jumped` = the move was a teleport.
+export function trackStage(run, pos, now, jumped) {
+  const s = stageAt(pos.z);
+  if (s === run.maxStage + 1 && !jumped) {
+    run.maxStage = s;
+    run.enteredAt[s] = now;
+  }
+  if (s === 0 && jumped) run.maxStage = 0; // back at the spawn
+  return s;
+}
+
+// Teleports the client may make: spawn, or the start of a stage it has reached.
+export function allowedTeleport(run, pos) {
+  if (stageAt(pos.z) === 0) return true;
+  for (let n = 1; n <= run.maxStage; n++) {
+    const r = stageRespawn(n);
+    if (Math.hypot(pos.x - r.x, pos.z - r.z) < 20) return true;
+  }
+  return false;
+}
+
+export function applyStageAction(p, run, action, pos, now) {
+  const fail = (error) => ({ ok: false, error });
+  switch (action?.type) {
+    case 'collectCoin': {
+      const c = coinById(action.id);
+      if (!c || run.maxStage < c.stage || !near(pos, c, 12)) return fail('');
+      if (now - (run.coinAt[c.id] || 0) < STAGE_COIN_COOLDOWN_MS) return fail('');
+      run.coinAt[c.id] = now;
+      const before = p.coins;
+      grantCoins(p, STAGE_COIN_VALUE, now);
+      return { ok: true, coins: p.coins - before };
+    }
+    case 'openSafe': {
+      const n = Number(action.stage);
+      if (!stageDef(n) || run.maxStage < n || !near(pos, stagePads(n).safe, 22)) return fail('Drive to the safe first');
+      if (now - (run.safeAt[n] || 0) < SAFE_COOLDOWN_MS) return fail(`Ready in ${formatClock(SAFE_COOLDOWN_MS - (now - run.safeAt[n]))}`);
+      run.safeAt[n] = now;
+      p.coins += SAFE_COINS;
+      return { ok: true, toast: `+${SAFE_COINS} Coins!` };
+    }
+    case 'stageWin': {
+      const n = Number(action.stage);
+      const s = stageDef(n);
+      if (!s || run.maxStage < n || !near(pos, stagePads(n).wins, 14)) return fail('Finish the stage first');
+      if (now - (run.enteredAt[n] || now) < stageMinTimeMs(n)) return fail('Finish the stage first');
+      grantWins(p, s.wins);
+      p.counters.stagesBeaten = (p.counters.stagesBeaten || 0) + 1;
+      if (n >= STAGES.length) p.counters.world1Beaten = (p.counters.world1Beaten || 0) + 1;
+      run.maxStage = 0;
+      return { ok: true, toast: `+${formatNumber(s.wins)} Wins!`, teleport: 'spawn' };
+    }
+    case 'useSkip': {
+      const n = Number(action.stage); // skip stage n+1
+      const next = stageDef(n + 1);
+      if (!next || run.maxStage < n || !near(pos, stagePads(n).skip, 14)) return fail('Stand on the Skip Stage pad');
+      if ((p.skips || 0) < 1) return fail('NEED_SKIP');
+      p.skips -= 1;
+      run.maxStage = n + 1;
+      run.enteredAt[n + 1] = now - stageMinTimeMs(n + 1);
+      return { ok: true, toast: `Skipped Stage ${n + 1}!`, teleport: { x: 0, z: stagePads(n + 1).wins.z + 18, ry: Math.PI } };
     }
     default:
       return fail('Unknown action');

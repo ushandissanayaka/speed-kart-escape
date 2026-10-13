@@ -4,12 +4,10 @@
 // Behind the wall: the dark track, signs, coins, trees and the Stage 2 gate.
 
 import * as THREE from 'three';
-import { studBox, plainBox, checkerBox } from '../util/textures.js';
+import { studBox, plainBox } from '../util/textures.js';
 import { textSprite, textPlane, updateTextObject, FONTS } from '../util/text.js';
-import { makeBillboard } from './Billboard.js';
-import { makeTree } from './Scenery.js';
 import { formatClock, merchantStatus } from '../../shared/gameData.js';
-import { GRASS_CHECKER } from './Arena.js';
+import { fadeNear } from './StageCourse.js';
 
 const FRAME = '#93a9de'; // light studded gate block
 const TUNNEL = '#3a62c8'; // inner tunnel walls
@@ -111,90 +109,17 @@ export class StageGate {
     add(front.mesh, 0, (OPEN_H - 2.6) / 2, Z0 - 1.2);
     this.wallTex = front.tex;
 
-    const stage1 = textSprite([{ text: 'Stage 1', size: 170, font: FONTS.fredoka, fill: '#ffffff', stroke: '#1f63ff', strokeWidth: 26 }], 11);
-    add(stage1, 0, 18, Z0 + 2);
+    const stage1 = textSprite([{ text: 'Stage 1', size: 170, font: FONTS.fredoka, fill: '#ffffff', stroke: '#1f63ff', strokeWidth: 26 }], 16);
+    add(stage1, 0, 21, Z0 + 2);
+    this.fadeLabels = [stage1];
 
-    this.buildStageArea(add);
-  }
-
-  buildStageArea(add) {
-    const a = AREA;
-    const zMid = (a.minZ + a.maxZ) / 2;
-    const len = a.maxZ - a.minZ;
-    // Grass ground + dark track with low curbs
-    add(checkerBox(a.maxX - a.minX, 2, len, GRASS_CHECKER), 0, -0.2, zMid);
-    const trackStart = Z0 - DEPTH; // -152
-    const trackEnd = -312;
-    const tLen = trackStart - trackEnd;
-    add(studBox(HALF * 2, 0.6, tLen, TRACK, { unit: 6, cells: 4, style: 'dot', cast: false }), 0, 0.95, (trackStart + trackEnd) / 2);
-    for (const sx of [-1, 1]) add(studBox(1.6, 1.8, tLen, '#2a3f8f', { unit: 2.6, cells: 2, style: 'dot' }), sx * (HALF + 0.8), 1.5, (trackStart + trackEnd) / 2);
-
-    // Enclosing walls
-    for (const sx of [-1, 1]) add(studBox(6, 52, len, AREA_WALL, { unit: 6, cells: 4, style: 'dot', cast: false }), sx * (a.maxX + 3), 26, zMid);
-    add(studBox(a.maxX * 2 + 12, 52, 6, AREA_WALL, { unit: 6, cells: 4, style: 'dot', cast: false }), 0, 26, a.minZ - 3);
-
-    // Trees on the grass either side
-    for (const [x, z] of [[-62, -170], [-70, -232], [-60, -276], [64, -196], [70, -250], [58, -290], [-74, -300], [72, -168]]) {
-      const t = makeTree(0.9);
-      t.position.set(x, 0.8, z);
-      this.root.add(t);
-    }
-
-    // Signs beside the track
-    const S = (text, size) => ({ text, size, font: FONTS.fredoka, fill: '#ffffff', stroke: '#1b2350', strokeWidth: size * 0.16 });
-    const left = makeBillboard({
-      width: 26,
-      height: 13,
-      lift: 2,
-      lines: [S('Stage 2 will give you', 80), S('better Trails which can', 80), S('boost your speed!', 80)],
-      textHeight: 9.5,
-    });
-    left.position.set(-58, 0.8, -206);
-    left.rotation.y = 0.35;
-    this.root.add(left);
-    const right = makeBillboard({ width: 24, height: 12, lift: 2, lines: [S('Get wins to', 84), S('unlock new', 84), S('karts!!!', 84)], textHeight: 9 });
-    right.position.set(60, 0.8, -214);
-    right.rotation.y = -0.35;
-    this.root.add(right);
-    for (let i = 0; i < 3; i++) {
-      const arrow = textSprite([{ text: '➘', size: 120, font: FONTS.fredoka, fill: '#3dff4a', stroke: '#0a3a14', strokeWidth: 10 }], 3.2);
-      arrow.material.rotation = Math.PI / 2;
-      add(arrow, 44 - i * 2.5, 12 - i * 2.6, -210 + i * 1.5);
-    }
-
-    // Coins along the track
-    this.coins = [];
-    for (let i = 0; i < 7; i++) {
-      const c = coin();
-      c.userData.dynamic = true;
-      add(c, ((i % 3) - 1) * 16, 3.2, -170 - i * 19);
-      this.coins.push(c);
-    }
-
-    // Stage 2 gate at the far end (also behind a see-through wall)
-    const s2 = -300;
-    const frame = (w, h, d, color = FRAME) => studBox(w, h, d, color, { unit: 6, cells: 4, style: 'dot' });
-    for (const sx of [-1, 1]) add(frame(16, 28, 14), sx * (HALF + 8), 14, s2 - 7);
-    add(frame(HALF * 2, 8, 14), 0, 24, s2 - 7);
-    add(plainBox(HALF * 2, 1.6, 0.4, BAND, { emissive: new THREE.Color(BAND), emissiveIntensity: 0.9 }), 0, 19, s2 - 0.3);
-    const back = seeThroughWall(HALF * 2, 19);
-    add(back.mesh, 0, 9.5, s2 - 0.5);
-    this.wallTex2 = back.tex;
-    add(textSprite([{ text: 'Stage 2', size: 120, font: FONTS.fredoka, fill: '#ffffff', stroke: '#1f63ff', strokeWidth: 18 }], 4.2), 0, 10, s2 + 2);
-    this.arrow = textSprite([{ text: '⬇', size: 110, font: FONTS.fredoka, fill: '#3dff4a', stroke: '#0a3a14', strokeWidth: 10 }], 3.6);
-    add(this.arrow, 12, 8, s2 + 3);
     this.t = 0;
   }
 
-  update(dt, now) {
+  update(dt, now, camera) {
+    if (camera) fadeNear(this.fadeLabels, camera.position);
     this.t += dt;
     this.wallTex.offset.y -= dt * 0.05;
-    this.wallTex2.offset.y -= dt * 0.05;
-    this.arrow.position.y = 8 + Math.sin(this.t * 3) * 0.8;
-    for (const [i, c] of this.coins.entries()) {
-      c.rotation.y = this.t * 2 + i;
-      c.position.y = 3.2 + Math.sin(this.t * 2.5 + i) * 0.4;
-    }
     const m = merchantStatus(now);
     const text = `${m.present ? 'Here for' : 'Arrives in'} ${formatClock(m.msLeft)}`;
     if (text !== this.lastTimer) {

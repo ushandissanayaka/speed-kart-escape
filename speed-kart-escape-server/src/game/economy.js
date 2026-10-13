@@ -21,11 +21,19 @@ export function clampToBounds(x, z) {
 
 // Returns the distance that counts toward Speed, or 0 if the report looks like a
 // teleport, a speed hack, or the player is idling on a treadmill.
+// A move counts as a teleport when it is far beyond what the kart could drive.
+export function isJump(profile, prev, next, dtMs) {
+  if (!prev) return true;
+  const dt = Math.min(Math.max(dtMs, 16), 1000) / 1000;
+  const maxDist = kartTopVelocity(profile.speed, profile.kart, profile.customSpeed, profile.level) * dt * SLACK + 0.5;
+  return Math.hypot(next.x - prev.x, next.z - prev.z) > maxDist * 3;
+}
+
 export function validatedDistance(profile, prev, next, dtMs) {
   if (!prev) return 0;
   const dt = Math.min(Math.max(dtMs, 16), 1000) / 1000;
   const dist = Math.hypot(next.x - prev.x, next.z - prev.z);
-  const maxDist = kartTopVelocity(profile.speed, profile.kart, profile.customSpeed) * dt * SLACK + 0.5;
+  const maxDist = kartTopVelocity(profile.speed, profile.kart, profile.customSpeed, profile.level) * dt * SLACK + 0.5;
   if (dist > maxDist * 3) return 0; // teleport / respawn
   return Math.min(dist, maxDist);
 }
