@@ -99,14 +99,28 @@ const TELL = {
   ]),
   chords: ['A', 'A', 'A', 'E', 'A', 'A', 'E', 'A'],
 };
+// Grieg — In the Hall of the Mountain King (B minor), the famous creeping theme.
+const KING = {
+  bpm: 138,
+  ...melody([
+    [[59, 2], [61, 2], [62, 2], [64, 2], [66, 2], [62, 2], [66, 4]],
+    [[65, 2], [61, 2], [65, 4], [64, 2], [60, 2], [64, 4]],
+    [[59, 2], [61, 2], [62, 2], [64, 2], [66, 2], [62, 2], [66, 2], [71, 2]],
+    [[69, 2], [66, 2], [62, 2], [66, 2], [69, 8]],
+  ]),
+  chords: ['Bm', 'Bm', 'F#', 'F#', 'Bm', 'Bm', 'D', 'D'],
+};
 const CHORDS = {
+  Bm: { root: 47, tones: [59, 62, 66] },
+  'F#': { root: 42, tones: [58, 61, 66] },
+  D: { root: 50, tones: [62, 66, 69] },
   Am: { root: 45, tones: [57, 60, 64] },
   E: { root: 40, tones: [56, 59, 64] },
   A: { root: 45, tones: [57, 61, 64] },
 };
 const PLAYLIST = [
   { step: 'tellStep', bpm: TELL.bpm, perBeat: 4 },
-  { step: 'turcaStep', bpm: TURCA.bpm, perBeat: 4 },
+  { step: 'kingStep', bpm: KING.bpm, perBeat: 4 },
 ];
 
 export class MusicPlayer {
@@ -405,6 +419,20 @@ export class MusicPlayer {
     });
     if (e === 2 || e === 6) this.snare(t, 0.03);
     if (e === 0) this.kick(t, 0.12);
+  }
+
+  kingStep(t, step) {
+    const { e } = this.classicPiece(KING, t, step, (m, tt, dur, loop) => {
+      // first time round: low and sneaky (bassoon-like); then up an octave with strings
+      if (loop % 2 === 0) {
+        this.synth(m - 12, tt, dur * 0.8, 0.035, 900);
+        this.piano(m, tt, dur * 0.6, 0.05);
+      } else {
+        this.strings([m + 12], tt, dur * 0.85, 0.03);
+        this.piano(m + 12, tt, dur * 0.6, 0.06);
+      }
+    });
+    if (e === 0 || e === 4) this.kick(t, 0.1);
   }
 
   turcaStep(t, step) {
