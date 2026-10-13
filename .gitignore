@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+
+# Reference recording is ~390 MB — too large for git hosting
+referances/*.mp4
