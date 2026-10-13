@@ -39,7 +39,6 @@ function wallTexture() {
   g.fillStyle = grad;
   g.fillRect(0, 0, 64, 256);
   g.fillStyle = 'rgba(170,215,255,0.12)';
-  for (let y = 0; y < 256; y += 16) g.fillRect(0, y, 64, 3);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
@@ -95,13 +94,13 @@ export class StageGate {
     add(plainBox(HALF * 2, 0.4, DEPTH + 4, TRACK), 0, -0.15, zc + 1);
 
     // --- merchant timer screen across the top -------------------------------
-    add(frame(HALF * 1.4, 12, 1.6, '#7f97d4'), 0, OPEN_H + 9, Z0 + 1.2);
-    add(plainBox(HALF * 1.4 - 2, 10, 0.4, '#101c4a', { emissive: new THREE.Color('#0b1640'), emissiveIntensity: 0.9 }), 0, OPEN_H + 9, Z0 + 2.1);
-    const title = textPlane([{ text: 'Merchant', size: 64, font: FONTS.montserrat, weight: 800, fill: '#3ec7ff', stroke: '#06123a', strokeWidth: 4 }], 2.4);
-    add(title, 0, OPEN_H + 11.4, Z0 + 2.35);
+    add(frame(HALF * 1.9, 19, 1.6, '#7f97d4'), 0, OPEN_H + 12, Z0 + 1.2);
+    add(plainBox(HALF * 1.9 - 2.4, 16.6, 0.4, '#101c4a', { emissive: new THREE.Color('#0b1640'), emissiveIntensity: 0.9 }), 0, OPEN_H + 12, Z0 + 2.1);
+    const title = textPlane([{ text: 'Merchant', size: 64, font: FONTS.montserrat, weight: 800, fill: '#3ec7ff', stroke: '#06123a', strokeWidth: 4 }], 4.2);
+    add(title, 0, OPEN_H + 16, Z0 + 2.35);
     this.timerStyle = (text) => [{ text, size: 72, font: FONTS.montserrat, weight: 800, fill: '#ffffff', stroke: '#06123a', strokeWidth: 4 }];
-    this.merchantTime = textPlane(this.timerStyle('Arrives in 0:00'), 3.0);
-    add(this.merchantTime, 0, OPEN_H + 7.4, Z0 + 2.35);
+    this.merchantTime = textPlane(this.timerStyle('Arrives in 0:00'), 5.6);
+    add(this.merchantTime, 0, OPEN_H + 9, Z0 + 2.35);
     this.lastTimer = '';
 
     // --- the see-through blue wall you drive through ------------------------
@@ -119,12 +118,11 @@ export class StageGate {
   update(dt, now, camera) {
     if (camera) fadeNear(this.fadeLabels, camera.position);
     this.t += dt;
-    this.wallTex.offset.y -= dt * 0.05;
     const m = merchantStatus(now);
     const text = `${m.present ? 'Here for' : 'Arrives in'} ${formatClock(m.msLeft)}`;
     if (text !== this.lastTimer) {
       this.lastTimer = text;
-      updateTextObject(this.merchantTime, this.timerStyle(text), 3.0);
+      updateTextObject(this.merchantTime, this.timerStyle(text), 5.6);
     }
   }
 }

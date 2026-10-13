@@ -15,8 +15,8 @@ export const BELT_Y = 1.0;
 
 const STYLES = {
   grey: { rail: '#a9b2d8', rail2: '#c6cdea', arch: '#a9b2d8', top: '#97a1cc', label: '#ffffff', glow: 0 },
-  yellow: { rail: '#ffe21a', rail2: '#eef77e', arch: '#e4f27e', top: '#ffe21a', label: '#ffd21c', glow: 0.32 },
-  red: { rail: '#ff1f3f', rail2: '#ff4f6e', arch: '#ff2f5a', top: '#ff1f3f', label: '#ff2a3a', glow: 0.3 },
+  yellow: { rail: '#ffe21a', rail2: '#eef77e', arch: '#e4f27e', top: '#ffe21a', label: '#ffd21c', glow: 0.32, blink: true },
+  red: { rail: '#ff1f3f', rail2: '#ff4f6e', arch: '#ff2f5a', top: '#ff1f3f', label: '#ff2a3a', glow: 0.3, blink: true },
   neon: { rail: '#14c8ff', rail2: '#8af0ff', arch: '#18b4ff', top: '#1aa0ff', label: '#3ec7ff', glow: 1 },
   rainbow: { rail: '#ff2a2a', rail2: '#ff6a6a', arch: '#ff2a2a', top: '#ff2a2a', label: '#ff3fd2', glow: 0.35 },
 };
@@ -75,12 +75,13 @@ export class Treadmill {
     this.root.position.set(def.x, 0, TREADMILL_BACK_Z - d / 2);
     // Model is built with the arch at local -Z; turn it so the arch backs onto the south wall.
     this.root.rotation.y = Math.PI;
-    this.tinted = []; // meshes recoloured by the x100 animation
+    this.tinted = [];
+    this.blinking = []; // red / yellow: lights flash on and off // meshes recoloured by the x100 animation
     this.glowing = []; // meshes whose glow pulses (x25)
     const emissive = (c) => (st.glow ? new THREE.Color(c).getHex() : 0x000000);
     // Animated treadmills get one private material per colour (shared by all their
     // parts, so they still merge into few draw calls); the rest use cached materials.
-    const animated = giant || st.glow > 0.5;
+    const animated = giant || st.glow > 0.5 || st.blink;
     const ownMats = new Map();
     const block = (bw, bh, bd, color, extra = {}) => {
       const m = studBox(bw, bh, bd, color, { unit: 2.6, cells: 2, style: 'dot', emissive: emissive(color), emissiveIntensity: st.glow * 0.6, ...extra });
@@ -94,6 +95,7 @@ export class Treadmill {
     const add = (m, x, y, z, tint = true) => {
       m.position.set(x, y, z);
       this.root.add(m);
+      if (tint && st.blink) this.blinking.push(m);
       if (tint && (giant || st.glow > 0.5)) {
         if (giant) this.tinted.push(m);
         else this.glowing.push(m);
@@ -171,8 +173,9 @@ export class Treadmill {
     }
 
     // --- floating label -------------------------------------------------------
-    this.label = textSprite(labelLines(def, st), giant ? 6.5 : def.mult === 1 ? 3.4 : 4.2);
-    this.label.position.set(0, this.topY + (giant ? 5 : 3.2), backZ);
+    this.label = textSprite(labelLines(def, st), giant ? 7.5 : def.mult === 1 ? 4.6 : 5.6);
+    // Float the label forward over the belt so it never cuts into the back wall.
+    this.label.position.set(0, this.topY + (giant ? 9 : 7), backZ + (giant ? 14 : 11));
     this.root.add(this.label);
 
     this.lockLabel = null;
@@ -199,10 +202,10 @@ export class Treadmill {
     this.locked = locked;
     if (locked && !this.lockLabel) {
       this.lockLabel = textSprite(
-        [{ text: `🔒 ${treadmillLockText(this.def)}`, size: 56, font: FONTS.fredoka, fill: '#ffffff', stroke: '#141833', strokeWidth: 9 }],
-        1.9
+        [{ text: `🔒 ${treadmillLockText(this.def)}`, size: 64, font: FONTS.fredoka, fill: '#ffffff', stroke: '#141833', strokeWidth: 11 }],
+        3.4
       );
-      this.lockLabel.position.set(0, this.label.position.y - (this.def.style === 'rainbow' ? 4.4 : 3), this.label.position.z);
+      this.lockLabel.position.set(0, this.label.position.y - (this.def.style === 'rainbow' ? 5.6 : 4.6), this.label.position.z);
       this.root.add(this.lockLabel);
     }
     if (this.lockLabel) this.lockLabel.visible = locked;
@@ -212,6 +215,12 @@ export class Treadmill {
     this.t += dt;
     // Belt stripes run away from the arch, toward the open front.
     if (this.beltTex) this.beltTex.offset.y -= dt * 0.6;
+
+    // Red / yellow: lights fade slowly on and off, at the same pace as the x25 glow.
+    if (this.blinking.length) {
+      const w = 0.5 + 0.5 * Math.sin(this.t * 3.2);
+      for (const m of this.blinking) m.material.emissiveIntensity = 0.1 + 1.0 * w;
+    }
 
     // x25: neon pulse.
     if (this.glowing.length) {
