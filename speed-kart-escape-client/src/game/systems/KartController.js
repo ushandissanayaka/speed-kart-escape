@@ -21,6 +21,8 @@ export class KartController {
     this.topSpeed = 40;
     this.onTreadmill = null;
     this.driving = false;
+    this.jumpY = 0; // height above the ground while jumping
+    this.vy = 0;
   }
 
   place(x, z, ry) {
@@ -28,15 +30,17 @@ export class KartController {
     this.z = z;
     this.ry = ry;
     this.v = 0;
+    this.jumpY = 0;
+    this.vy = 0;
     this.y = this.collision.heightAt(x, z);
   }
 
-  setStats(speedStat, kartId, customSpeed) {
-    this.topSpeed = kartTopVelocity(speedStat, kartId, customSpeed);
+  setStats(speedStat, kartId, customSpeed, level) {
+    this.topSpeed = kartTopVelocity(speedStat, kartId, customSpeed, level);
   }
 
   // move: { x: right, y: forward } relative to the camera; camFwd: camera forward on XZ.
-  update(dt, move, camFwd) {
+  update(dt, move, camFwd, jump = false) {
     const top = this.topSpeed;
     const prevV = this.v;
 
@@ -87,6 +91,17 @@ export class KartController {
 
     const ground = this.collision.heightAt(this.x, this.z);
     this.y += (ground - this.y) * Math.min(1, dt * 14);
+
+    // Jump (Space / Jump button): a short hop that clears the sliding logs.
+    if (jump && this.jumpY === 0) this.vy = 27;
+    if (this.vy !== 0 || this.jumpY > 0) {
+      this.jumpY += this.vy * dt;
+      this.vy -= 72 * dt;
+      if (this.jumpY <= 0) {
+        this.jumpY = 0;
+        this.vy = 0;
+      }
+    }
     this.accel = (this.v - prevV) / Math.max(dt, 1e-3);
   }
 }

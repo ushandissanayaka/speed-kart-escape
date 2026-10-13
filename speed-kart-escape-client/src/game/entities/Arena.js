@@ -95,8 +95,8 @@ export function buildArena(scene, collision) {
   wall(235, -40, 30, 300, 88, '#7896e2');
   wall(0, 95, 500, 30, 88, '#7896e2');
   // North outer wall has a gap where the Stage 1 area sits behind the gate.
-  wall(-167, -205, 166, 40, 88, '#7896e2');
-  wall(167, -205, 166, 40, 88, '#7896e2');
+  wall(-205, -205, 90, 40, 88, '#7896e2');
+  wall(205, -205, 90, 40, 88, '#7896e2');
 
   // Large raised panels on the inner faces (the light-blue "screens" in the reference).
   const panels = new THREE.Group();
@@ -111,7 +111,7 @@ export function buildArena(scene, collision) {
   };
   // Tier-2 panels peek above tier 1
   rowOf(13, -210, 35, (x, i) => panel(x, 64 + (i % 2) * 5, 79, 30, 30 + (i % 3) * 4, Math.PI));
-  rowOf(13, -210, 35, (x, i) => Math.abs(x) > 100 && panel(x, 64 + ((i + 1) % 2) * 5, -184, 30, 30 + (i % 3) * 4, 0));
+  rowOf(13, -210, 35, (x, i) => Math.abs(x) > 165 && panel(x, 64 + ((i + 1) % 2) * 5, -184, 30, 30 + (i % 3) * 4, 0));
   rowOf(8, -165, 38, (z, i) => panel(-219, 64 + (i % 2) * 5, z, 32, 30 + (i % 3) * 4, Math.PI / 2));
   rowOf(8, -165, 38, (z, i) => panel(219, 64 + ((i + 1) % 2) * 5, z, 32, 30 + (i % 3) * 4, -Math.PI / 2));
   // Tier-1 panels
@@ -136,7 +136,7 @@ export function buildArena(scene, collision) {
   scene.add(group);
 
   // Collision for walls north of the plaza (the stage corridor is open).
-  collision.addBox(-117, -150, 174, 50);
-  collision.addBox(117, -150, 174, 50);
+  collision.addBox(-117, -139, 174, 22);
+  collision.addBox(117, -139, 174, 22);
   return group;
 }

@@ -2,8 +2,8 @@ import { Room } from '@colyseus/core';
 import { StartingPlaceState, PlayerState } from './schema.js';
 import { readSession } from '../auth/legionAuth.js';
 import { getRecord, scheduleSave, computeLeaderboards } from '../game/profiles.js';
-import { clampToBounds, driveGain, runAction, treadmillTick, validatedDistance } from '../game/economy.js';
-import { WORLD, newProfile, publicSummary, refreshDaily } from '../shared/gameData.js';
+import { clampToBounds, driveGain, isJump, runAction, treadmillTick, validatedDistance } from '../game/economy.js';
+import { WORLD, allowedTeleport, applyStageAction, newProfile, newRun, publicSummary, refreshDaily, trackStage } from '../shared/gameData.js';
 
 const LEADERBOARD_INTERVAL_MS = 15_000;
 const MAX_AVATAR_JSON = 4000;
@@ -34,6 +34,7 @@ export class StartingPlaceRoom extends Room {
     this.onMessage('move', (client, m) => this.handleMove(client, m));
     this.onMessage('action', (client, m) => this.handleAction(client, m));
     this.onMessage('avatar', (client, m) => this.handleAvatar(client, m));
+    this.onMessage('stage', (client, m) => this.handleStage(client, m));
     this.onMessage('sync', (client) => this.pushProfile(client));
 
     this.clock.setInterval(() => this.tickSecond(), 1000);
@@ -54,7 +55,7 @@ export class StartingPlaceRoom extends Room {
     }
 
     const record = auth.isGuest ? { name: auth.name, avatar: null, profile: newProfile() } : getRecord(auth.legionId, auth.name);
-    client.userData = { auth, record, pos: null, lastMoveAt: 0, dirty: false, playtime: { start: Date.now(), claimed: new Set() } };
+    client.userData = { auth, record, pos: null, lastMoveAt: 0, dirty: false, playtime: { start: Date.now(), claimed: new Set() }, run: newRun() };
     refreshDaily(record.profile);
     if (auth.legionId) online.set(auth.legionId, { room: this, client });
 
@@ -93,9 +94,14 @@ export class StartingPlaceRoom extends Room {
     if (!Number.isFinite(x) || !Number.isFinite(z)) return;
     const now = Date.now();
     const next = clampToBounds(x, z);
+    const jumped = isJump(ud.record.profile, ud.pos, next, now - ud.lastMoveAt);
+    // Teleports are only legal to the spawn or a reached stage start; anything else
+    // (a cheat or a very long lag spike) forfeits the current stage run.
+    if (jumped && ud.pos && !allowedTeleport(ud.run, next)) ud.run = newRun();
     const dist = validatedDistance(ud.record.profile, ud.pos, next, now - ud.lastMoveAt);
     ud.pos = next;
     ud.lastMoveAt = now;
+    trackStage(ud.run, next, now, jumped);
 
     ps.x = next.x;
     ps.z = next.z;
@@ -124,6 +130,14 @@ export class StartingPlaceRoom extends Room {
       }
       this.pushProfile(client);
     }
+  }
+
+  handleStage(client, action) {
+    const ud = client.userData;
+    if (!ud?.pos) return;
+    const result = applyStageAction(ud.record.profile, ud.run, action, ud.pos, Date.now());
+    client.send('stageResult', { type: action?.type, id: action?.id, ...result });
+    if (result.ok) this.pushProfile(client);
   }
 
   handleAvatar(client, m) {

@@ -16,6 +16,7 @@ import { RewardChest, CHEST_SIZE } from '../entities/RewardChest.js';
 import { MerchantStall } from '../entities/MerchantStall.js';
 import { WorldGate, GATE } from '../entities/WorldGate.js';
 import { StageGate } from '../entities/StageGate.js';
+import { StageCourse } from '../entities/StageCourse.js';
 import { makeVideoScreen, makeWallScreens } from '../entities/VideoScreen.js';
 import { Collision } from '../systems/Collision.js';
 import { mergeStatic } from '../util/mergeStatic.js';
@@ -75,6 +76,9 @@ export class StartingPlace {
     wallScreens.position.set(118, 0.45, 56);
     wallScreens.rotation.y = Math.PI;
     scene.add(wallScreens);
+
+    // The six stages behind the Stage 1 gate.
+    this.course = new StageCourse(scene, this.collision);
 
     // Bake everything that never moves into a few big meshes (hundreds of draw calls -> dozens).
     const m = mergeStatic(scene);
@@ -223,6 +227,7 @@ export class StartingPlace {
     this.chest.update(dt, profile, now);
     this.merchant.update(dt);
     this.worldGate.update(dt);
-    this.stageGate.update(dt, now);
+    this.stageGate.update(dt, now, camera);
+    this.course.update(dt, now, camera);
   }
 }

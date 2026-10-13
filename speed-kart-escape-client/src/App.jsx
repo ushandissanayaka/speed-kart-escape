@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Game } from './game/Game.js';
 import { ControlLayer, Hud, Popups } from './ui/Hud.jsx';
 import { PanelHost } from './ui/panels/Panels.jsx';
+import { PurchasePrompt } from './ui/PurchasePrompt.jsx';
 import { newProfile } from './shared/gameData.js';
 
 // HUD scale: the reference was captured at 1918x1004.
@@ -86,6 +87,7 @@ export default function App() {
           <ControlLayer game={game} touch={isTouch} />
           <Hud game={game} profile={profile} online={online} serverOffset={serverOffset} openPanel={openPanel} />
           <Popups game={game} />
+          <PurchasePrompt game={game} />
           {panel && <PanelHost panel={panel} game={game} profile={profile} identity={identity} onClose={closePanel} openPanel={openPanel} />}
         </>
       )}

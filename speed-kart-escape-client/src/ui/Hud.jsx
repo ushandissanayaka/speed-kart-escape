@@ -28,6 +28,8 @@ import {
   formatClock,
   formatNumber,
   playtimeClaimable,
+  activeEvent,
+  kartSpeedFor,
   playtimeState,
   maxLevel,
   canRebirth as canRebirthFn,
@@ -76,7 +78,7 @@ export function Hud({ game, profile, online, serverOffset, openPanel }) {
   }).length;
   const canRebirth = canRebirthFn(profile);
   const commitCs = () => {
-    if (csEdit !== null && csEdit !== '') game.action({ type: 'setCustomSpeed', value: Math.min(TUNING.customSpeedMax, Math.max(0, Number(csEdit) || 0)) });
+    if (csEdit !== null && csEdit !== '') game.action({ type: 'setCustomSpeed', value: Math.min(kartSpeedFor(profile.level), Math.max(0, Number(csEdit) || 0)) });
     setCsEdit(null);
   };
 
@@ -100,6 +102,7 @@ export function Hud({ game, profile, online, serverOffset, openPanel }) {
       </div>
       {!online && <div className="offline-chip o">Offline mode</div>}
 
+      <EventPill now={now} />
       {turboLeft > 0 && (
         <div className="turbo">
           <ShoeIcon />
@@ -174,7 +177,7 @@ export function Hud({ game, profile, online, serverOffset, openPanel }) {
               onBlur={commitCs}
               onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
             />
-            <div className="max o">Max. {TUNING.customSpeedMax}</div>
+            <div className="max o">Max. {kartSpeedFor(profile.level)}</div>
           </label>
         </div>
 
@@ -246,6 +249,10 @@ export function Popups({ game }) {
   const [gains, setGains] = useState([]);
   const [toasts, setToasts] = useState([]);
   const [stage, setStage] = useState(null);
+  const [death, setDeath] = useState(null);
+  const [level, setLevel] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const [win, setWin] = useState(null);
   const idRef = useRef(0);
 
   useEffect(() => {
@@ -253,7 +260,7 @@ export function Popups({ game }) {
       game.events.on('gain', (g) => {
         const id = ++idRef.current;
         const jitter = (Math.random() - 0.5) * 80;
-        setGains((list) => [...list.slice(-14), { id, amount: g.amount, x: g.x + 70 + jitter, y: g.y + (Math.random() - 0.5) * 30 }]);
+        setGains((list) => [...list.slice(-14), { id, amount: g.amount, kind: g.kind, x: g.x + 70 + jitter, y: g.y + (Math.random() - 0.5) * 30 }]);
         setTimeout(() => setGains((list) => list.filter((x) => x.id !== id)), 1000);
       }),
       game.events.on('toast', (t) => {
@@ -265,6 +272,23 @@ export function Popups({ game }) {
         setStage({ ...s, id: ++idRef.current });
         setTimeout(() => setStage(null), 1600);
       }),
+      game.events.on('win', (w) => {
+        const id = ++idRef.current;
+        setWin({ ...w, id });
+        setTimeout(() => setWin((cur) => (cur?.id === id ? null : cur)), 2600);
+      }),
+      game.events.on('death', (d) => setDeath(d)),
+      game.events.on('deathEnd', () => setDeath(null)),
+      game.events.on('levelPopup', (l) => {
+        const id = ++idRef.current;
+        setLevel({ ...l, id });
+        setTimeout(() => setLevel((cur) => (cur?.id === id ? null : cur)), 2600);
+      }),
+      game.events.on('notice', (n) => {
+        const id = ++idRef.current;
+        setNotice({ ...n, id });
+        setTimeout(() => setNotice((cur) => (cur?.id === id ? null : cur)), 6000);
+      }),
     ];
     return () => offs.forEach((off) => off());
   }, [game]);
@@ -274,7 +298,7 @@ export function Popups({ game }) {
       <div className="popups">
         {gains.map((g) => (
           <div key={g.id} className="gain o" style={{ left: g.x, top: g.y }}>
-            +{formatNumber(g.amount)} <ShoeIcon />
+            +{formatNumber(g.amount)} {g.kind === 'coin' ? <CoinIcon /> : <ShoeIcon />}
           </div>
         ))}
       </div>
@@ -290,7 +314,83 @@ export function Popups({ game }) {
           <span>{stage.name}</span>
         </div>
       )}
+      {death && <TeleportBack game={game} death={death} />}
+      {win && (
+        <div className="win-pop" key={win.id}>
+          <div className="confetti2d">
+            {Array.from({ length: 70 }, (_, i) => (
+              <i key={i} style={{ '--x': `${(i * 37) % 100}%`, '--d': `${(i % 10) * 0.08}s`, '--r': `${(i * 53) % 360}deg`, '--c': CONFETTI[i % CONFETTI.length] }} />
+            ))}
+          </div>
+          <div className="win-trophy">
+            <TrophyIcon />
+          </div>
+          <div className="win-text o">{win.text}</div>
+          <div className="win-sub o">Returning to the starting place…</div>
+        </div>
+      )}
+      {level && (
+        <div className="level-pop" key={level.id}>
+          <div className="lp-level">LEVEL {level.level}</div>
+          <div className="lp-speed o">
+            KART SPEED {level.from} &gt; {level.to}
+          </div>
+        </div>
+      )}
+      {notice && (
+        <div className={`notice n-${notice.kind}`} key={notice.id}>
+          <span className="n-icon">{notice.kind === 'coins' ? <CoinIcon /> : notice.kind === 'speed' ? <ShoeIcon /> : <GiftIcon />}</span>
+          <span className="n-text">
+            <span className="n-title">{notice.title}</span>
+            <span className="n-desc">{notice.desc}</span>
+            {notice.kind !== 'merchant' && <span className="n-sub">Happening now, on every server</span>}
+          </span>
+        </div>
+      )}
     </>
+  );
+}
+
+const CONFETTI = ['#ff3b5c', '#ffd21c', '#3dff4a', '#2ec5ff', '#b13bff', '#ff8a2a', '#ffffff', '#ff5ccf'];
+
+// Top-centre timer for the global 2x COINS / 2x SPEED events.
+function EventPill({ now }) {
+  const e = activeEvent(now);
+  if (!e) return null;
+  return (
+    <div className={`event-pill ev-${e.id}`}>
+      <span className="ep-icon">{e.id === 'coins' ? <CoinIcon /> : <ShoeIcon />}</span>
+      <span className="ep-label">{e.label}</span>
+      <span className="ep-time">{formatClock(e.msLeft)}</span>
+    </div>
+  );
+}
+
+// "Teleport Back?" popup shown after crashing into a hazard: 5-second countdown,
+// a paid revive in place, or respawn straight away.
+function TeleportBack({ game, death }) {
+  const [left, setLeft] = useState(death.ms);
+  useEffect(() => {
+    const t = setInterval(() => setLeft(Math.max(0, death.until - performance.now())), 100);
+    return () => clearInterval(t);
+  }, [death]);
+  return (
+    <div className="tp-back">
+      <div className="tp-title o">Teleport Back?</div>
+      <div className="tp-sub o">{death.toSpawn ? 'Return to the starting place' : 'Return to your last stage start'}</div>
+      <div className="tp-bar">
+        <div className="fill" style={{ width: `${(left / death.ms) * 100}%` }} />
+        <span className="o">{Math.ceil(left / 1000)}</span>
+      </div>
+      <div className="tp-buttons">
+        <button className="tp-buy press o" onClick={() => game.reviveHere()}>
+          BUY <GemIcon /> 9
+        </button>
+        <button className="tp-now press o" onClick={() => game.finishDeath()}>
+          Respawn Now
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -386,6 +486,19 @@ export function ControlLayer({ game, touch }) {
       onPointerCancel={onUp}
       onContextMenu={(e) => e.preventDefault()}
     >
+      {touch && (
+        <button
+          className="jump-btn press o"
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            game.setJump(true);
+          }}
+          onPointerUp={() => game.setJump(false)}
+          onPointerLeave={() => game.setJump(false)}
+        >
+          JUMP
+        </button>
+      )}
       {stick ? (
         <div className="joy active" style={{ left: stick.ox, top: stick.oy }}>
           <div className="knob" style={{ transform: `translate(${stick.kx}px, ${stick.ky}px)` }} />

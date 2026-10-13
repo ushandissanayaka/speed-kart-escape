@@ -44,9 +44,18 @@ npm run dev        # listens on :2567
 | POST | `/api/webhook/legion` | Gems purchase fulfillment |
 | GET | `/api/leaderboards` | Current top 9 per stat |
 
+## Stages
+
+The six stages run north behind the Stage 1 gate (`STAGES` in `src/shared/gameData.js`). The room tracks each player's run:
+
+- **Entering stages:** a stage counts as reached only when the kart drives into it from the previous one.
+- **Teleports:** the only legal teleports are to the spawn and to the start of a stage already reached. Any other jump cancels the run.
+- **Wins pad:** pays the wins for that stage only if the stage was reached and the minimum drive time has passed. It then sends the player back to the spawn.
+- **Coins and coin safes:** checked against the player's position, with a cooldown per player.
+
 ## Gem SKUs
 
-`speed_100k`, `speed_1m`, `speed_10m`, `pass_x2_wins`, `pass_x2_speed`, `mythical_treadmill`, `coins_500`. Create these in your Bloxity IAP catalog and point the game's webhook URL at `/api/webhook/legion`.
+`speed_100k`, `speed_1m`, `speed_10m`, `pass_x2_wins`, `pass_x2_speed`, `mythical_treadmill`, `coins_500`. Also `skip_stage` (29), `revive` (9), `super_treadmill`, the coin and win packs, `boost_*` and `trail_*`. Create these in your Bloxity IAP catalog and point the game's webhook URL at `/api/webhook/legion`.
 
 ## Environment
 

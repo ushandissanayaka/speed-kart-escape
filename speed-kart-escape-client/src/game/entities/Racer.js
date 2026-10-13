@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { Kart, SEAT } from './Kart.js';
 import { BloxityAvatar } from './BloxityAvatar.js';
 import { Trail } from './Trail.js';
+import { ExhaustFire, WindStreaks } from './KartFx.js';
 import { textSprite, FONTS } from '../util/text.js';
 
 export class Racer {
@@ -15,6 +16,9 @@ export class Racer {
     this.avatar = new BloxityAvatar();
     this.avatar.root.position.set(0, SEAT.y, SEAT.z);
     this.kart.root.add(this.avatar.root);
+    this.exhaust = new ExhaustFire(this.kart.root);
+    this.exhaust.attachSparks(scene);
+    this.wind = new WindStreaks(this.root);
     this.trail = new Trail(scene);
     this.trail.setTrail(trail);
     this.trailId = trail;
@@ -33,6 +37,23 @@ export class Racer {
     this.root.add(this.nameTag);
   }
 
+  // Blue bubble shown for a few seconds after respawning (like the reference).
+  setShield(on) {
+    if (on && !this.shield) {
+      this.shield = new THREE.Mesh(
+        new THREE.SphereGeometry(9, 28, 20),
+        new THREE.MeshBasicMaterial({ color: '#5fc8ff', transparent: true, opacity: 0.28, depthWrite: false, toneMapped: false })
+      );
+      this.shield.position.y = 4;
+      this.shield.renderOrder = 7;
+      this.root.add(this.shield);
+    }
+    if (this.shield) {
+      this.shield.visible = on;
+      if (on) this.shield.material.opacity = 0.22 + Math.sin(performance.now() / 120) * 0.08;
+    }
+  }
+
   setKart(id) {
     if (id && id !== this.kart.kartId) this.kart.build(id);
   }
@@ -49,7 +70,7 @@ export class Racer {
   }
 
   // velocity: forward units/s; steer: -1..1; accel: forward acceleration for body pitch
-  animate(dt, velocity, steer, accel = 0, topSpeed = 60) {
+  animate(dt, velocity, steer, accel = 0, topSpeed = 60, airborne = false) {
     const speed01 = Math.min(1, Math.abs(velocity) / topSpeed);
     this.kart.update(dt, velocity, steer);
     this.avatar.update(dt, steer, speed01);
@@ -64,10 +85,13 @@ export class Racer {
     // Trail emitter behind the rear wheels
     this.emitter.set(0, 1.2, -7.5).applyMatrix4(this.root.matrixWorld);
     this.trail.update(dt, this.emitter, velocity);
+    this.exhaust.update(dt, Math.min(1, Math.max(0, velocity) / Math.max(topSpeed, 1)));
+    this.wind.update(dt, airborne);
   }
 
   dispose() {
     this.scene.remove(this.root);
     this.trail.dispose();
+    this.exhaust.dispose();
   }
 }
