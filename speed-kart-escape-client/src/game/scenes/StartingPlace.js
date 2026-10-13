@@ -47,9 +47,9 @@ export class StartingPlace {
     this.chest.addTo(scene);
     this.collision.addBox(WORLD.chest.x, WORLD.chest.z, CHEST_SIZE.w + 3, CHEST_SIZE.d + 3, chestRy);
 
-    this.merchant = new MerchantStall(WORLD.merchantPad.x, -63, WORLD.merchantPad.x, WORLD.merchantPad.z);
+    this.merchant = new MerchantStall(WORLD.merchantPad.x, -67, WORLD.merchantPad.x, WORLD.merchantPad.z);
     scene.add(this.merchant.root);
-    this.collision.addBox(WORLD.merchantPad.x, -62, 20, 9);
+    this.collision.addBox(WORLD.merchantPad.x, -67, 42, 20);
 
     const yellow = studBox(WORLD.yellowPad.w, 0.3, WORLD.yellowPad.d, '#fae46b', { unit: 2.6, cells: 1, cast: false });
     yellow.position.set(WORLD.yellowPad.x, 0.15, WORLD.yellowPad.z);
@@ -157,7 +157,7 @@ export class StartingPlace {
       makeBillboard({
         width: 36,
         height: 17,
-        lift: 24,
+        lift: 34,
         wallMounted: true,
         lines: [S('With treadmills you', 92), S('can gain more and', 92), S('more speed.', 92)],
         textHeight: 13,
@@ -168,7 +168,7 @@ export class StartingPlace {
       makeBillboard({
         width: 44,
         height: 17,
-        lift: 25,
+        lift: 35,
         wallMounted: true,
         lines: [S('AFK Farm!', 150, { italic: true })],
         textHeight: 9,
@@ -183,7 +183,7 @@ export class StartingPlace {
       ],
       6.2
     );
-    tm.position.set(8, 30, 12);
+    tm.position.set(-20, 46, 30);
     scene.add(tm);
   }
 

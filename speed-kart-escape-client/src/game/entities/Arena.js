@@ -71,8 +71,8 @@ export function buildArena(scene, collision) {
   const lb = floorSlab(144, 159, -46, 46, 1.2, COLORS.platform, { unit: 5.2, checker: 0, thickness: 1.2 });
   lb.castShadow = false;
   collision.addHeight(144, 159, -46, 46, 1.2);
-  floorSlab(-78, 78, 13, 57, 0.45, COLORS.treadPlatform, { unit: 5.2, checker: 0, thickness: 0.45 });
-  collision.addHeight(-78, 78, 13, 57, 0.45);
+  floorSlab(-116, 86, 13, 57, 0.45, COLORS.treadPlatform, { unit: 5.2, checker: 0, thickness: 0.45 });
+  collision.addHeight(-116, 86, 13, 57, 0.45);
 
   // Walls -------------------------------------------------------------------
   // Tier 1 hugs the grass, tier 2 sits further back and higher, like the reference.

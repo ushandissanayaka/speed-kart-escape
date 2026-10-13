@@ -29,12 +29,12 @@ export const WORLD = {
 // The back end (arch) is at the south wall; karts drive on from the north.
 export const TREADMILL_BACK_Z = 56;
 export const TREADMILLS = [
-  { id: 'red10', label: 'x10 Speed', mult: 10, x: -66, w: 18, d: 34, style: 'red', requires: { pass: 'superTreadmill', sku: 'super_treadmill' } },
-  { id: 'yellow5', label: 'x5 Speed', mult: 5, x: -44, w: 18, d: 34, style: 'yellow', requires: { wins: 5 } },
-  { id: 'grey1a', label: 'x1 Speed', mult: 1, x: -22, w: 18, d: 34, style: 'grey', requires: null },
-  { id: 'grey1b', label: 'x1 Speed', mult: 1, x: 0, w: 18, d: 34, style: 'grey', requires: null },
-  { id: 'cyan25', label: 'x25 Speed', mult: 25, x: 22, w: 18, d: 34, style: 'neon', requires: { wins: 100 } },
-  { id: 'rainbow100', label: 'x100 Speed', mult: 100, x: 55, w: 40, d: 40, style: 'rainbow', requires: { pass: 'mythicalTreadmill', sku: 'mythical_treadmill' } },
+  { id: 'red10', label: 'x10 Speed', mult: 10, x: -99, w: 22, d: 34, style: 'red', requires: { pass: 'superTreadmill', sku: 'super_treadmill' } },
+  { id: 'yellow5', label: 'x5 Speed', mult: 5, x: -69, w: 22, d: 34, style: 'yellow', requires: { wins: 5 } },
+  { id: 'grey1a', label: 'x1 Speed', mult: 1, x: -39, w: 22, d: 34, style: 'grey', requires: null },
+  { id: 'grey1b', label: 'x1 Speed', mult: 1, x: -9, w: 22, d: 34, style: 'grey', requires: null },
+  { id: 'cyan25', label: 'x25 Speed', mult: 25, x: 21, w: 22, d: 34, style: 'neon', requires: { wins: 100 } },
+  { id: 'rainbow100', label: 'x100 Speed', mult: 100, x: 60, w: 40, d: 40, style: 'rainbow', requires: { pass: 'mythicalTreadmill', sku: 'mythical_treadmill' } },
 ];
 export const treadmillCenterZ = (t) => TREADMILL_BACK_Z - t.d / 2;
 const RAIL = (t) => (t.style === 'rainbow' ? 3 : 2.3);
@@ -248,10 +248,11 @@ const trailOf = (id) => TRAILS.find((t) => t.id === id) || TRAILS[0];
 // Kart velocity in units/second from the Speed stat. Speed grows without bound,
 // so velocity grows logarithmically and is capped.
 export function kartTopVelocity(speed, kartId = 'noob', customSpeed = 0, level = 1) {
-  let v = 14 + 2.2 * kartSpeedFor(level) + 3 * Math.log10(1 + Math.max(0, speed));
+  // New players start slow (~19 units/s); level and Speed make the kart faster.
+  let v = 6 + 1.1 * kartSpeedFor(level) + 4 * Math.log10(1 + Math.max(0, speed));
   v *= 1 + kartOf(kartId).topSpeedBonus;
   v = Math.min(v, 175);
-  if (customSpeed > 0) v = Math.min(v, 14 + 2.2 * customSpeed);
+  if (customSpeed > 0) v = Math.min(v, 6 + 1.1 * customSpeed);
   return v;
 }
 
