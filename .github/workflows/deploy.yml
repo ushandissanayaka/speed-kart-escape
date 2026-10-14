@@ -1,0 +1,245 @@
+# ============================================================
+# Speed Kart Escape -> Bloxity Legion
+# ============================================================
+# Branch -> channel:
+#   dev           -> dev  channel  (https://speed-kart-escape.dev.play.bloxity.io)
+#   master / main -> prod channel  (https://speed-kart-escape.play.bloxity.io)
+#
+# Repo secrets required (Settings -> Secrets and variables -> Actions):
+#   LEGION_DEPLOY_TOKEN   the deploy token from hosting.bloxity.io
+#   GHCR_PUSH_TOKEN       classic PAT from the IMAGE_OWNER account with
+#                         write:packages (so Legion can pull the image).
+#
+# Server environment on hosting.bloxity.io (not in this file):
+#   MONGODB_URI           REQUIRED with more than one pod: shared profiles,
+#                         leaderboards and Gems grants.
+#   SESSION_SECRET        the same long random string on every pod.
+#   LEGION_WEBHOOK_SECRET the Gems webhook secret from Boxity.
+#   Gems webhook URL to give Boxity:
+#     https://speed-kart-escape.host.bloxity.io/api/webhook/legion
+#
+# Scaling: every room holds SEAT_CAP players and Legion adds pods as players
+# arrive. SEAT_CAP x MAX_REPLICAS is the ceiling:
+#   40 seats x 2500 pods = 100,000 players at once.
+#
+# BEFORE THE FIRST RUN: the app must already exist on hosting.bloxity.io with the
+# id below (GAME_ID). Legion has no create-on-deploy; deploying to an app it has
+# never heard of is a 404.
+#
+# ONE-TIME after the first successful run: make the GHCR package
+# `speed-kart-escape-server` public (github.com/ushandissanayaka -> Packages ->
+# speed-kart-escape-server -> Package settings -> Change visibility -> Public),
+# otherwise Legion cannot pull the image.
+
+name: Deploy to Bloxity
+
+on:
+  push:
+    branches: [master, main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  GAME_ID: speed-kart-escape
+  IMAGE_OWNER: ushandissanayaka
+  IMAGE_NAME: speed-kart-escape-server
+  SERVER_DIR: speed-kart-escape-server
+  CLIENT_DIR: speed-kart-escape-client
+  # Seats per room (the server's maxClients is set from this) and the most pods.
+  SEAT_CAP: '40'
+  MAX_REPLICAS: '2500'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the deploy token is present
+        env:
+          LEGION_TOKEN: ${{ secrets.LEGION_DEPLOY_TOKEN }}
+        run: |
+          if [ -z "${LEGION_TOKEN:-}" ]; then
+            echo "::error::LEGION_DEPLOY_TOKEN is not set on this repository."
+            echo "Add it under Settings -> Secrets and variables -> Actions."
+            echo "The value is the deploy token from hosting.bloxity.io."
+            exit 1
+          fi
+          echo "Deploy token present (${#LEGION_TOKEN} characters)."
+
+      # Informational only - cannot fail the build. Tells a bad token apart
+      # from a token that is fine but has no app called GAME_ID.
+      - name: Diagnose the token against Legion
+        continue-on-error: true
+        env:
+          LEGION_TOKEN: ${{ secrets.LEGION_DEPLOY_TOKEN }}
+          KNOWN_GOOD_APP: squirrel-escape
+        run: |
+          set -uo pipefail
+          probe () {
+            local app="$1" body code
+            body="$(mktemp)"
+            code="$(curl -sS -o "$body" -w '%{http_code}' \
+              --connect-timeout 10 --max-time 30 \
+              -H "Authorization: Bearer ${LEGION_TOKEN}" \
+              "https://legion.bloxity.io/v1/apps/${app}")" || code="000 (unreachable)"
+            printf '  %-30s HTTP %-6s %s\n' "$app" "$code" "$(head -c 160 "$body" | tr -d '\r\n')"
+          }
+          echo "Asking Legion about both apps with the SAME token:"
+          probe "${GAME_ID}"
+          probe "${KNOWN_GOOD_APP}"
+          echo
+          echo "  * both 401  -> the token is wrong, expired, or from another account."
+          echo "  * ${KNOWN_GOOD_APP} ok, ${GAME_ID} 401/404 -> token is valid, but no app"
+          echo "    '${GAME_ID}' exists on Legion yet, or the token is scoped to another game."
+          echo "  * both ok   -> credentials are fine."
+
+      - name: Work out the channel
+        id: ch
+        run: |
+          if [ "${{ github.ref_name }}" = "dev" ]; then
+            echo "channel=dev" >> "$GITHUB_OUTPUT"
+            echo "backend=https://${GAME_ID}.dev.host.bloxity.io" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel=prod" >> "$GITHUB_OUTPUT"
+            echo "backend=https://${GAME_ID}.host.bloxity.io" >> "$GITHUB_OUTPUT"
+          fi
+          sha="${GITHUB_SHA::7}"
+          if [ -n "${GHCR_PUSH_TOKEN:-}" ]; then
+            owner="${IMAGE_OWNER,,}"
+            user="${IMAGE_OWNER}"
+            echo "Publishing the image to ghcr.io/${owner} (GHCR_PUSH_TOKEN is set)."
+          else
+            owner="${GITHUB_REPOSITORY_OWNER,,}"
+            user="${{ github.actor }}"
+            echo "::warning::GHCR_PUSH_TOKEN is not set - publishing to ghcr.io/${owner} with GITHUB_TOKEN. If that package is private the rollout will never land (ImagePullBackOff)."
+          fi
+          if [ -z "$sha" ] || [ -z "$owner" ]; then
+            echo "::error::could not work out the image tag (sha='$sha' owner='$owner')"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "owner=$owner" >> "$GITHUB_OUTPUT"
+          echo "ghcr_user=$user" >> "$GITHUB_OUTPUT"
+        env:
+          GHCR_PUSH_TOKEN: ${{ secrets.GHCR_PUSH_TOKEN }}
+
+      # ---------- backend (Colyseus server) ----------
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ steps.ch.outputs.ghcr_user }}
+          password: ${{ secrets.GHCR_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the server image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ env.SERVER_DIR }}
+          push: true
+          tags: ghcr.io/${{ steps.ch.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ steps.ch.outputs.channel }}-${{ steps.ch.outputs.sha }}
+          build-args: |
+            APP_VERSION=${{ steps.ch.outputs.sha }}
+            SEAT_CAP=${{ env.SEAT_CAP }}
+
+      - name: Tell Legion to roll it out
+        env:
+          LEGION_TOKEN: ${{ secrets.LEGION_DEPLOY_TOKEN }}
+          IMAGE: ghcr.io/${{ steps.ch.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ steps.ch.outputs.channel }}-${{ steps.ch.outputs.sha }}
+          CHANNEL: ${{ steps.ch.outputs.channel }}
+          VERSION: ${{ steps.ch.outputs.sha }}
+        run: |
+          set -uo pipefail
+          url="https://legion.bloxity.io/v1/apps/${GAME_ID}/deploy"
+          echo "POST $url"
+          echo "  image:       $IMAGE"
+          echo "  channel:     $CHANNEL"
+          echo "  seatCap:     $SEAT_CAP"
+          echo "  maxReplicas: $MAX_REPLICAS"
+          body="$(mktemp)"
+          code="$(curl -sS -o "$body" -w '%{http_code}' -X POST "$url" \
+            --connect-timeout 15 --max-time 120 \
+            --retry 3 --retry-connrefused --retry-delay 5 \
+            -H "Authorization: Bearer ${LEGION_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            -d "$(printf '{"channel":"%s","image":"%s","version":"%s","seatCap":%s,"maxReplicas":%s}' \
+                  "$CHANNEL" "$IMAGE" "$VERSION" "$SEAT_CAP" "$MAX_REPLICAS")")" || {
+            echo "::error::curl could not reach Legion at all (network/DNS)."
+            exit 1
+          }
+          echo "HTTP $code"
+          echo "--- response ---"; cat "$body"; echo; echo "----------------"
+          case "$code" in
+            2*) echo "Rollout accepted." ;;
+            401|403)
+              echo "::error::Legion rejected the token (HTTP $code). LEGION_DEPLOY_TOKEN is wrong, expired, or belongs to a different account."
+              exit 1 ;;
+            404)
+              echo "::error::Legion has no app called '${GAME_ID}' (HTTP 404). Create it on hosting.bloxity.io first."
+              exit 1 ;;
+            *)
+              echo "::error::Legion rollout failed with HTTP $code - see the response above."
+              exit 1 ;;
+          esac
+
+      # ---------- frontend (Three.js + React client) ----------
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Hosted build: connect through Legion.SDK.net.resolveEndpoint (never a fixed
+      # socket to <id>.host.bloxity.io); the host URL is used for HTTP only.
+      - name: Build the client
+        working-directory: ${{ env.CLIENT_DIR }}
+        env:
+          VITE_GAME_SLUG: ${{ env.GAME_ID }}
+          VITE_BLOXITY_HOSTED: 'true'
+          VITE_BLOXITY_HOSTING_ID: ${{ env.GAME_ID }}
+          VITE_SERVER_HTTP: ${{ steps.ch.outputs.backend }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Zip the build
+        working-directory: ${{ env.CLIENT_DIR }}/dist
+        run: zip -qr ../../build.zip .
+
+      - name: Upload the client to Bloxity
+        env:
+          LEGION_TOKEN: ${{ secrets.LEGION_DEPLOY_TOKEN }}
+          CHANNEL: ${{ steps.ch.outputs.channel }}
+          VERSION: ${{ steps.ch.outputs.sha }}
+        run: |
+          set -uo pipefail
+          url="https://api.bloxity.io/v1/hosting/games/${GAME_ID}/frontend?channel=${CHANNEL}&version=${VERSION}"
+          echo "POST $url"
+          ls -la build.zip
+          body="$(mktemp)"
+          code="$(curl -sS -o "$body" -w '%{http_code}' -X POST "$url" \
+            --connect-timeout 15 --max-time 300 \
+            -H "Authorization: Bearer ${LEGION_TOKEN}" \
+            -H "Content-Type: application/zip" \
+            --data-binary @build.zip)" || {
+            echo "::error::curl could not reach the hosting API at all (network/DNS)."
+            exit 1
+          }
+          echo "HTTP $code"
+          echo "--- response ---"; cat "$body"; echo; echo "----------------"
+          case "$code" in
+            2*) echo "Client uploaded." ;;
+            401|403) echo "::error::Hosting rejected the token (HTTP $code)."; exit 1 ;;
+            404) echo "::error::No hosted game called '${GAME_ID}' (HTTP 404). Create it on hosting.bloxity.io first."; exit 1 ;;
+            413) echo "::error::build.zip is too large for the hosting API (HTTP 413)."; exit 1 ;;
+            *) echo "::error::Client upload failed with HTTP $code - see the response above."; exit 1 ;;
+          esac
+
+      - name: Where it went
+        run: |
+          if [ "${{ steps.ch.outputs.channel }}" = "prod" ]; then
+            echo "Play: https://${GAME_ID}.play.bloxity.io"
+          else
+            echo "Play: https://${GAME_ID}.dev.play.bloxity.io"
+          fi

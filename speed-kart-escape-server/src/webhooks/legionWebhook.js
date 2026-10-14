@@ -5,7 +5,7 @@
 // Retries can deliver the same transaction twice, so grants are de-duplicated by transactionId.
 
 import crypto from 'node:crypto';
-import { findRecord, getRecord, flushProfiles } from '../game/profiles.js';
+import { findRecord, getRecord, flushProfiles, useMongo, recordGrant } from '../game/profiles.js';
 import { GEM_PRODUCTS, applyGemProduct } from '../shared/gameData.js';
 import { notifyProfileChanged } from '../rooms/StartingPlaceRoom.js';
 
@@ -30,7 +30,7 @@ function parse(body) {
   };
 }
 
-export function legionWebhookHandler(req, res) {
+export async function legionWebhookHandler(req, res) {
   if (!secretMatches(req.get('x-legion-webhook-secret'))) {
     return res.status(401).json({ error: 'Bad webhook secret' });
   }
@@ -38,6 +38,20 @@ export function legionWebhookHandler(req, res) {
   if (!sku || !GEM_PRODUCTS[sku]) return res.status(400).json({ error: 'Unknown sku' });
   if (!legionId) return res.status(400).json({ error: 'Missing user' });
   if (!transactionId) return res.status(400).json({ error: 'Missing transactionId' });
+
+  // Boxity hosting (many pods): this may not be the buyer's pod. Record the grant in
+  // MongoDB keyed by transactionId and answer 2xx; the pod holding the player applies
+  // it within a few seconds (see applyPendingGrants in index.js).
+  if (useMongo) {
+    try {
+      const r = await recordGrant({ transactionId, legionId, sku });
+      console.log(`[webhook] ${sku} -> ${legionId} (${transactionId}) recorded${r.duplicate ? ' (duplicate)' : ''}`);
+      return res.json({ ok: true });
+    } catch (err) {
+      console.error('[webhook] could not record grant:', err.message);
+      return res.status(500).json({ error: 'Storage unavailable' }); // Boxity retries
+    }
+  }
 
   const record = findRecord(legionId) || getRecord(legionId);
   const result = applyGemProduct(record.profile, sku, transactionId);
