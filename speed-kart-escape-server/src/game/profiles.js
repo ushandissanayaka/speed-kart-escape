@@ -13,7 +13,7 @@ import { MongoClient } from 'mongodb';
 import { mergeLeaderboard, newProfile, normalizeProfile } from '../shared/gameData.js';
 
 const MONGO_URI = process.env.MONGODB_URI || '';
-export const useMongo = !!MONGO_URI;
+export let useMongo = !!MONGO_URI; // turned off if MongoDB can't be reached at startup
 
 const DATA_DIR = path.resolve(process.env.DATA_DIR || './data');
 const FILE = path.join(DATA_DIR, 'profiles.json');
@@ -40,22 +40,32 @@ export function setOnlineCheck(fn) {
   isOnline = fn;
 }
 
+async function connectMongo() {
+  const client = new MongoClient(MONGO_URI, { maxPoolSize: 20, serverSelectionTimeoutMS: 10_000 });
+  await client.connect();
+  const db = client.db(process.env.MONGODB_DB || 'speed_kart_escape');
+  profilesCol = db.collection('profiles');
+  grantsCol = db.collection('gem_grants');
+  await Promise.all([
+    ...BOARD_STATS.map((s) => profilesCol.createIndex({ [`profile.${s}`]: -1 })),
+    grantsCol.createIndex({ legionId: 1, applied: 1 }),
+  ]);
+  setInterval(() => flushProfiles().catch((err) => console.error('[profiles] flush failed:', err.message)), FLUSH_MS).unref();
+  setInterval(() => refreshTops().catch(() => {}), TOPS_MS).unref();
+  await refreshTops().catch(() => {});
+  console.log('[profiles] using MongoDB');
+}
+
 export async function loadProfiles() {
   if (useMongo) {
-    const client = new MongoClient(MONGO_URI, { maxPoolSize: 20 });
-    await client.connect();
-    const db = client.db(process.env.MONGODB_DB || 'speed_kart_escape');
-    profilesCol = db.collection('profiles');
-    grantsCol = db.collection('gem_grants');
-    await Promise.all([
-      ...BOARD_STATS.map((s) => profilesCol.createIndex({ [`profile.${s}`]: -1 })),
-      grantsCol.createIndex({ legionId: 1, applied: 1 }),
-    ]);
-    setInterval(() => flushProfiles().catch((err) => console.error('[profiles] flush failed:', err.message)), FLUSH_MS).unref();
-    setInterval(() => refreshTops().catch(() => {}), TOPS_MS).unref();
-    await refreshTops().catch(() => {});
-    console.log('[profiles] using MongoDB');
-    return;
+    try {
+      await connectMongo();
+      return;
+    } catch (err) {
+      // Don't crash the pod: a server that never starts means nobody can play together.
+      console.error(`[profiles] MongoDB unreachable (${err.message}) — using file storage on this pod. Check MONGODB_URI and the database IP allowlist.`);
+      useMongo = false;
+    }
   }
   fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(FILE)) return;
