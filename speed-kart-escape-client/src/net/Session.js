@@ -25,7 +25,8 @@ import * as legion from '../bloxity/legion.js';
 
 const HTTP = import.meta.env.VITE_SERVER_HTTP || 'http://localhost:2567';
 const WS = import.meta.env.VITE_SERVER_WS || 'ws://localhost:2567';
-const HOSTED = import.meta.env.VITE_BLOXITY_HOSTED === 'true';
+export const HOSTED = import.meta.env.VITE_BLOXITY_HOSTED === 'true';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export class Emitter {
   constructor() {
@@ -68,6 +69,13 @@ export class OnlineSession extends Emitter {
       /* storage unavailable */
     }
     this.joinOptions = { sessionToken, guestName: identity.displayName || identity.username, lastSeen };
+    // Party play on our own servers: everyone sharing the party's roomKey lands in
+    // one room that strangers can't join (the server filters rooms by partyKey).
+    // When hosted on Boxity, play.bloxity.io handles parties automatically.
+    if (!HOSTED) {
+      this.party = await legion.getPartyLaunch();
+      if (this.party && !this.party.managed) this.joinOptions.partyKey = this.party.roomKey;
+    }
     await this.join();
   }
 
@@ -78,15 +86,68 @@ export class OnlineSession extends Emitter {
     return endpoint;
   }
 
+  // Join with retries: when hosted, resolve a fresh endpoint every attempt (each one is
+  // pinned to one pod) and back off for up to ~60 s while a server cold-starts.
   async join() {
-    const client = new Client(await this.endpoint());
-    const room = await client.joinOrCreate(ROOM_NAME, this.joinOptions);
+    const deadline = Date.now() + (HOSTED ? 60_000 : 0);
+    let wait = 1000;
+    for (;;) {
+      try {
+        await this.joinOnce();
+        return;
+      } catch (err) {
+        if (!HOSTED || this.closed || Date.now() > deadline) {
+          if (this.party && !this.party.managed && !this.partyReported) {
+            this.partyReported = true;
+            legion.partyFailed('room-full');
+          }
+          throw err;
+        }
+        await sleep(wait);
+        wait = Math.min(8000, wait * 1.6);
+      }
+    }
+  }
+
+  // ?roomId= from Boxity's "Open Rooms" Join button or a friend invite
+  async joinWantedRoom(roomId) {
+    if (HOSTED) {
+      // resolve the room's pod first: a bare joinById could land on another pod
+      const res = await fetch(`https://play.bloxity.io/v1/dir/${encodeURIComponent(legion.HOSTING_ID)}/list`);
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : data.rooms || [];
+      const hit = list.find((r) => r.id === roomId || r.roomId === roomId);
+      if (!hit?.joinUrl) return null;
+      return new Client(hit.joinUrl).joinById(roomId, this.joinOptions);
+    }
+    return new Client(WS).joinById(roomId, this.joinOptions);
+  }
+
+  async joinOnce() {
+    let room = null;
+    const wanted = !this.triedRoomId && new URLSearchParams(window.location.search).get('roomId');
+    if (wanted) {
+      this.triedRoomId = true;
+      room = await this.joinWantedRoom(wanted).catch(() => null); // gone or full: matchmake normally
+    }
+    if (!room) {
+      const client = new Client(await this.endpoint());
+      room = await client.joinOrCreate(ROOM_NAME, this.joinOptions);
+    }
     if (this.closed) {
       room.leave();
       return;
     }
     this.room = room;
     legion.updateRoom(room.roomId);
+    if (this.party && !this.party.managed && !this.partyReported) {
+      this.partyReported = true;
+      legion.partyJoined(room.roomId);
+    }
+    room.onMessage('emote', (m) => this.emit('emote', m));
+    // players already here when we join vs. players who arrive later
+    let synced = false;
+    room.onStateChange.once(() => setTimeout(() => (synced = true), 0));
 
     room.onMessage('profile', (m) => this.emit('profile', { profile: normalizeProfile(m.profile), serverNow: m.serverNow, playtime: m.playtime }));
     room.onMessage('gain', (m) => this.emit('gain', m));
@@ -100,6 +161,8 @@ export class OnlineSession extends Emitter {
     const players = room.state.players;
     players.onAdd((p, id) => {
       if (id === room.sessionId) return;
+      if (synced) legion.playerJoined(p.name);
+      else legion.playerInRoom(p.name);
       this.emit('playerAdd', { id, p });
       p.onChange(() => this.emit('playerChange', { id, p }));
     });
@@ -131,6 +194,9 @@ export class OnlineSession extends Emitter {
 
   sendMove(x, z, ry, v) {
     this.room?.connection?.isOpen && this.room.send('move', { x, z, ry, v });
+  }
+  sendEmote(id) {
+    this.room?.connection?.isOpen && this.room.send('emote', { id });
   }
   action(a) {
     this.room?.send('action', a);
@@ -203,6 +269,8 @@ export class OfflineSession extends Emitter {
     const row = (k) => (s[k] > 0 ? [{ ...me, value: s[k] }] : []);
     this.emit('leaderboards', { speed: mergeLeaderboard('speed', row('speed')), wins: mergeLeaderboard('wins', row('wins')), rebirths: mergeLeaderboard('rebirths', row('rebirths')) });
   }
+
+  sendEmote() {}
 
   sendMove(x, z) {
     const next = { x, z };

@@ -31,7 +31,8 @@ app.get('/api/leaderboards', (_req, res) => res.json(computeLeaderboards()));
 
 const server = http.createServer(app);
 const gameServer = new Server({ transport: new WebSocketTransport({ server }) });
-gameServer.define(ROOM_NAME, StartingPlaceRoom);
+// filterBy partyKey: a Boxity party (own servers) shares one room strangers can't join
+gameServer.define(ROOM_NAME, StartingPlaceRoom).filterBy(['partyKey']);
 
 const stats = startStatsReporter(onlineLegionRecords);
 

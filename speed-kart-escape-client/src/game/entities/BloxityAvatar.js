@@ -60,9 +60,11 @@ export class BloxityAvatar {
   captureRest() {
     this.body.updateMatrixWorld(true);
     const rootInv = new THREE.Matrix4().copy(this.body.matrixWorld).invert();
+    this.bindQ = {};
     for (const [name, bone] of Object.entries(this.bones)) {
       const m = new THREE.Matrix4().multiplyMatrices(rootInv, bone.matrixWorld);
       this.restInverse.set(name, m.invert());
+      this.bindQ[name] = bone.quaternion.clone(); // bind pose, for emotes
     }
   }
 
@@ -143,8 +145,71 @@ export class BloxityAvatar {
     const b = this.bones;
     if (b.Neck_Offset) b.Neck_Offset.rotation.z = -this.steer * 0.12;
     if (b.Spine1) b.Spine1.rotation.x = -0.08 * speed01 + Math.sin(this.t * 9) * 0.01 * speed01;
+    this.applyEmote(dt);
+  }
+
+  // --- Boxity emotes --------------------------------------------------------
+  // clip = { len, loop, tracks: { boneName: [[timeSec, xDeg, yDeg, zDeg], ...] } }.
+  // Values are degree deltas over the bind pose (euler XYZ, right-multiplied onto
+  // the bone's bind quaternion), smoothstep between keys, blended in over ~0.1 s.
+  playEmote(clip) {
+    if (!clip?.tracks || !this.body || !this.bindQ) return;
+    this.stopEmote();
+    this.emote = { clip, t: 0 };
+  }
+
+  stopEmote() {
+    const e = this.emote;
+    if (!e) return;
+    this.emote = null;
+    for (const name of Object.keys(e.clip.tracks || {})) {
+      const bone = this.bones[name];
+      const bind = this.bindQ?.[name];
+      if (bone && bind) bone.quaternion.copy(bind);
+    }
+    this.poseSeated();
+  }
+
+  applyEmote(dt) {
+    const e = this.emote;
+    if (!e) return;
+    try {
+      e.t += dt;
+      const len = Math.max(0.01, Number(e.clip.len) || 1);
+      if (!e.clip.loop && e.t > len) return this.stopEmote();
+      const time = e.clip.loop ? e.t % len : Math.min(e.t, len);
+      const w = Math.min(1, e.t / 0.1);
+      for (const [name, keys] of Object.entries(e.clip.tracks)) {
+        const bone = this.bones[name];
+        const bind = this.bindQ[name];
+        if (!bone || !bind || !Array.isArray(keys) || !keys.length) continue; // unknown bone: ignore
+        let k;
+        if (time <= keys[0][0]) k = keys[0];
+        else if (time >= keys[keys.length - 1][0]) k = keys[keys.length - 1];
+        else {
+          let i = 0;
+          while (i < keys.length - 2 && keys[i + 1][0] < time) i++;
+          const a = keys[i];
+          const c = keys[i + 1];
+          let s = (time - a[0]) / Math.max(1e-6, c[0] - a[0]);
+          s = s * s * (3 - 2 * s);
+          k = [time, a[1] + (c[1] - a[1]) * s, a[2] + (c[2] - a[2]) * s, a[3] + (c[3] - a[3]) * s];
+        }
+        _euler.set(k[1] * DEG, k[2] * DEG, k[3] * DEG, 'XYZ');
+        _q.setFromEuler(_euler);
+        _target.copy(bind).multiply(_q);
+        bone.quaternion.slerp(_target, w);
+      }
+    } catch {
+      this.emote = null; // never throw from an emote
+    }
   }
 }
+
+const DEG = Math.PI / 180;
+const _euler = new THREE.Euler();
+const _q = new THREE.Quaternion();
+const _target = new THREE.Quaternion();
 
 // Blocky stand-in with the same proportions as player.glb (only used offline).
 function buildStandIn() {

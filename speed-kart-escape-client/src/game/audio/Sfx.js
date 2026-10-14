@@ -52,7 +52,7 @@ class SfxEngine {
     this.sfxBus = this.ctx.createGain();
     this.sfxBus.connect(this.master);
     this.musicBus = this.ctx.createGain();
-    this.musicBus.gain.value = this.musicOn ? 0.55 : 0;
+    this.musicBus.gain.value = this.musicOn ? this.musicGain : 0;
     this.musicBus.connect(this.master);
     // polish: gentle compression + a soft hall reverb on the music
     const comp = this.ctx.createDynamicsCompressor();
@@ -109,6 +109,16 @@ class SfxEngine {
     if (this.master) this.master.gain.value = this.muted ? 0 : this.volume;
   }
 
+  // Boxity music_volume (0..1) scales the music bus
+  get musicGain() {
+    return 0.55 * (this.musicLevel ?? 1);
+  }
+
+  setMusicLevel(v) {
+    this.musicLevel = Math.max(0, Math.min(1, v));
+    if (this.musicBus && this.musicOn) this.musicBus.gain.setTargetAtTime(this.musicGain, this.ctx.currentTime, 0.1);
+  }
+
   setMuted(m) {
     this.muted = m;
     this.setVolume(this.volume);
@@ -116,7 +126,7 @@ class SfxEngine {
 
   setMusic(on) {
     this.musicOn = on;
-    if (this.musicBus) this.musicBus.gain.setTargetAtTime(on ? 0.55 : 0, this.ctx.currentTime, 0.1);
+    if (this.musicBus) this.musicBus.gain.setTargetAtTime(on ? this.musicGain : 0, this.ctx.currentTime, 0.1);
   }
 
   // Lower the music briefly so sound effects stand out.
@@ -126,7 +136,7 @@ class SfxEngine {
     const t = this.ctx.currentTime;
     g.cancelScheduledValues(t);
     g.setTargetAtTime(0.2, t, 0.04);
-    g.setTargetAtTime(0.55, t + len, 0.35);
+    g.setTargetAtTime(this.musicGain, t + len, 0.35);
   }
 
   // Racing engine: a smooth, rising "whine" that revs up through the gears like a
@@ -177,7 +187,7 @@ class SfxEngine {
     e.gain.gain.setTargetAtTime(speed01 > 0.02 ? 0.025 + speed01 * 0.02 : 0.01, t, 0.15); // quieter engine
     const on = speed01 > 0.05;
     if (on !== e.wasOn && this.musicBus && this.musicOn) {
-      this.musicBus.gain.setTargetAtTime(on ? 0.4 : 0.55, t, 0.4);
+      this.musicBus.gain.setTargetAtTime(on ? this.musicGain * 0.73 : this.musicGain, t, 0.4);
       e.wasOn = on;
     }
   }
