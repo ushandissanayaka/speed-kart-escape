@@ -6,8 +6,10 @@
 //  Stage 4    "pits"     brick floor crossed by full-width sunken lava pits to jump
 //  Stage 5    "lava"     big lava room: jump between brick blocks along a zig-zag
 //                        route marked by dark brown rims
-//  Stage 6    "corridor" straight road between tall walls; full-width red blocks
-//                        slide back and forth, hide in the side bays
+//  Stage 6    "corridor" straight road between tall walls; one full-width red
+//                        block rushes back and forth, hide in the side bays
+//  Stage 7    "final"    very long hilly road over magma; huge iron balls roll down
+//                        it, hide in the bays; golden trophy at the finish
 //
 // Every stage ends at a gate with a purple "Skip Stage" pad, a yellow "+N Wins /
 // Return" pad and a 250-coin safe. Hazards are deterministic functions of the
@@ -36,13 +38,122 @@ const WALL_H_CORRIDOR = 80;
 // Stage 6 corridor layout and red block timing (see buildCorridor)
 const CORRIDOR = {
   roadHalf: 30,
-  bays: [60, 140, 220, 300, 380, 460],
-  bayLen: 26,
+  // bay centres (distance into the stage) and which wall they are cut into:
+  // a zig-zag, 3 on the left (-1) and 3 on the right (+1)
+  bays: [100, 210, 320, 430, 540, 650],
+  sides: [-1, 1, -1, 1, -1, 1],
+  bayLen: 40, // long, deep bays (they run out to the stage's hw)
   ramH: 30,
-  ramHD: 8, // half depth of a red block along the road
-  overshoot: 22, // how far a block runs past the bays at each end
-  speed: 0.48, // rad/s: ~13 s per round trip, up to ~30 units/s
-  waveLead: 0.5, // each block runs a little ahead of the one before it
+  ramHD: 8, // half depth of the red block along the road
+  // ONE red block rushes back and forth between these distances. It passes a bay
+  // about every 2.6 s, so reaching the next bay (~135 units) needs ~52 units/s:
+  // a Noob Kart (max ~47) can't; a Junior Kart with 600 Speed (~61) can.
+  from: 40,
+  to: 680,
+  speed: 246, // units/s
+};
+// Stage 7 (final): a very long hilly road high above a wide magma sea. Iron balls as
+// wide as the road roll down it toward you, so the only escape is a bay beside the
+// road. Bays are spaced so only a Pro Kart (~89 units/s) makes the longest runs:
+// 4 balls ~455 apart at 110 units/s; after one passes, the next reaches the next bay
+// (150 away) in ~2.5 s, which needs ~70 units/s; Junior (~61) and Noob (~47) can't.
+const FINAL = {
+  roadHalf: 30,
+  // road height: [distance into the stage, height]; starts on a hilltop at the
+  // Stage 6 door (22) and climbs, hill after hill, to the finish plateau
+  profile: [[0, 22], [45, 22], [175, 2], [320, 48], [470, 12], [620, 66], [770, 26], [920, 82], [1070, 40], [1220, 96], [1370, 56], [1520, 108], [1670, 70], [1820, 118], [1900, 124], [2000, 124]],
+  bays: [150, 280, 430, 550, 700, 840, 950, 1100, 1235, 1370, 1510, 1620, 1770], // on both sides
+  bayLen: 34,
+  bayWide: 26,
+  lavaY: -60, // magma far below the road
+  ballR: 28, // as wide as the road
+  balls: 4,
+  ballTop: 1890, // balls appear here (just before the finish plateau)...
+  ballBottom: 70, // ...and roll down to the start hilltop (clear of the respawn point)
+  ballSpeed: 110,
+  finish: 1900,
+  // Gaps in the road over the magma that must be jumped (Space). 55 long: a jump
+  // stays in the air ~0.7 s with 3.5 of slack per edge, so it needs ~68 units/s;
+  // a Pro Kart (~89) clears it, a Junior Kart (~61) falls in. Centres are between
+  // the bays.
+  jumps: [350, 625, 1025, 1440, 1695],
+  jumpLen: 55,
+};
+// Static magma look: dark cooled rock broken by glowing orange/red cracks, drawn
+// once on a canvas (no animation). Used on the final stage's walls and magma.
+let magmaTex = null;
+function magmaTexture() {
+  if (magmaTex) return magmaTex;
+  const N = 256;
+  const c = document.createElement('canvas');
+  c.width = c.height = N;
+  const g = c.getContext('2d');
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  g.fillStyle = '#ff5a10'; // molten base showing through the cracks
+  g.fillRect(0, 0, N, N);
+  // cooled rock plates (tiling: drawn 3x3 so edges wrap)
+  const plates = Array.from({ length: 26 }, () => [rnd() * N, rnd() * N, 18 + rnd() * 26]);
+  for (const [px, py, r] of plates) {
+    for (const ox of [-N, 0, N]) {
+      for (const oy of [-N, 0, N]) {
+        g.beginPath();
+        const sides = 6 + Math.floor(rnd() * 3);
+        for (let i = 0; i < sides; i++) {
+          const a = (i / sides) * Math.PI * 2;
+          const rr = r * (0.75 + rnd() * 0.35);
+          const x = px + ox + Math.cos(a) * rr;
+          const y = py + oy + Math.sin(a) * rr;
+          if (i) g.lineTo(x, y);
+          else g.moveTo(x, y);
+        }
+        g.closePath();
+        const shade = 18 + Math.floor(rnd() * 22);
+        g.fillStyle = `rgb(${shade + 22},${shade},${shade - 6})`;
+        g.fill();
+      }
+    }
+  }
+  // hot glow along the plate edges
+  g.globalCompositeOperation = 'lighter';
+  g.strokeStyle = 'rgba(255,170,40,0.35)';
+  g.lineWidth = 1.5;
+  for (let i = 0; i < 40; i++) {
+    g.beginPath();
+    let x = rnd() * N;
+    let y = rnd() * N;
+    g.moveTo(x, y);
+    for (let k = 0; k < 5; k++) {
+      x += (rnd() - 0.5) * 40;
+      y += (rnd() - 0.5) * 40;
+      g.lineTo(x, y);
+    }
+    g.stroke();
+  }
+  magmaTex = new THREE.CanvasTexture(c);
+  magmaTex.wrapS = magmaTex.wrapT = THREE.RepeatWrapping;
+  magmaTex.colorSpace = THREE.SRGBColorSpace;
+  return magmaTex;
+}
+const magmaMat = (repeatX, repeatY) => {
+  const map = magmaTexture().clone();
+  map.needsUpdate = true;
+  map.repeat.set(repeatX, repeatY);
+  return new THREE.MeshLambertMaterial({ map, emissive: '#ffffff', emissiveMap: map, emissiveIntensity: 0.55 });
+};
+
+const finalHeight = (d) => {
+  const P = FINAL.profile;
+  if (d <= P[0][0]) return P[0][1];
+  for (let i = 1; i < P.length; i++) {
+    if (d <= P[i][0]) {
+      const [d0, h0] = P[i - 1];
+      const [d1, h1] = P[i];
+      const u = (d - d0) / (d1 - d0);
+      return h0 + (h1 - h0) * (0.5 - 0.5 * Math.cos(Math.PI * u)); // smooth hills
+    }
+  }
+  return P[P.length - 1][1];
 };
 
 // Horizontal dark lines up a wall face: [centreY, height], a thick band then a thin line.
@@ -168,6 +279,7 @@ export class StageCourse {
     this.beams = []; // logs sliding along z: { mesh, x, z0, z1, speed, phase, hw, top }
     this.orbs = []; // { mesh, z, amp, speed, phase, y }
     this.rams = []; // stage 6 red blocks sliding along the road
+    this.balls = []; // stage 7 rolling iron balls
     this.spikeRects = []; // [minX, maxX, minZ, maxZ]
     this.coins = []; // { def, mesh, hiddenUntil }
     this.arrows = [];
@@ -225,16 +337,16 @@ export class StageCourse {
     const theme = s.theme;
     const wallX = (s.hw ?? HW) + 3;
     const WALL_H = s.wallH || BASE_WALL_H;
-    const wallColor = theme === 'grass' || theme === 'lava' ? WALL_BLUE : theme === 'corridor' ? '#7d9be6' : SAND_WALL;
+    const wallColor = theme === 'grass' || theme === 'lava' ? WALL_BLUE : theme === 'corridor' ? '#7d9be6' : theme === 'final' ? '#4a2a1c' : SAND_WALL;
 
     // Side walls + top rim (studded, tall like the plaza walls). On raised stages
     // the walls reach down past the lava pits so no sky shows under them.
-    const yLow = s.baseY ? -40 : 0;
+    const yLow = theme === 'final' ? FINAL.lavaY - 10 : s.baseY ? -40 : 0;
     for (const sx of [-1, 1]) {
       this.add(studBox(6, WALL_H - yLow, len, wallColor, { unit: 6, cells: 4, style: 'dot', cast: false }), sx * wallX, (WALL_H + yLow) / 2, zc);
-      this.add(studBox(8, 2, len, '#86a3e6', { unit: 6, cells: 4, style: 'dot', cast: false }), sx * wallX, WALL_H + 1, zc);
+      this.add(studBox(8, 2, len, theme === 'final' ? '#1a0f0b' : '#86a3e6', { unit: 6, cells: 4, style: 'dot', cast: false }), sx * wallX, WALL_H + 1, zc);
       this.collision.addBox(sx * wallX, zc, 6, len);
-      for (const [y, h] of wallLines(WALL_H)) this.add(studBox(0.8, h, len, darker(wallColor), { unit: 6, cells: 4, style: 'dot', cast: false }), sx * (wallX - 3.4), y, zc);
+      if (theme !== 'final') for (const [y, h] of wallLines(WALL_H)) this.add(studBox(0.8, h, len, darker(wallColor), { unit: 6, cells: 4, style: 'dot', cast: false }), sx * (wallX - 3.4), y, zc);
     }
 
     if (theme === 'pits') this.buildStage4(s, zMid);
@@ -242,6 +354,7 @@ export class StageCourse {
     else if (theme === 'grass') this.buildGrass(s, zMid);
     else if (theme === 'desert') this.buildDesert(s, zMid);
     else if (theme === 'lava') this.buildLava(s, zMid);
+    else if (theme === 'final') this.buildFinal(s, zMid);
     else this.buildCorridor(s, zMid);
   }
 
@@ -815,25 +928,26 @@ export class StageCourse {
       [-W, W, 0, 40], // start ledge
       // main route; the last field lists the sides with a dark brown rim
       // (w/e = -x/+x, s/n = near/far). Only the way in and the way out stay open.
-      // Every gap is 18: the starting kart (~19 units/s) only clears it by
-      // jumping right at the edge.
-      [-32, 32, 58, 118, 'we'],
-      [-30, 40, 136, 186, 'ne'], // turn left
-      [-100, -48, 124, 216, 'ws'],
-      [-112, -56, 234, 300, 'wn'], // turn right
-      [-38, 70, 250, 280, 'sn'],
-      [88, 136, 214, 320, 'es'], // turn forward
-      [70, 130, 338, 396, 'en'], // turn left
-      [-14, 52, 350, 390, 'sn'],
-      [-84, -32, 334, 420, 'ws'], // turn forward
-      [-74, -20, 438, 494, 'we'],
+      // A jump stays in the air ~0.7 s and each edge gives 3.5 of slack.
+      // First half: gaps of 24 (needs ~24 units/s), so the starting Noob Kart
+      // gets there. Second half: gaps of 42 (needs ~50 units/s): a Noob Kart (max
+      // ~47) can't make it; a Junior Kart with enough Speed (~61 at 600) can.
+      [-30, 30, 64, 122, 'we'],
+      [-30, 40, 146, 196, 'ne'], // turn left
+      [-112, -54, 140, 236, 'ws'],
+      [-130, -70, 260, 328, 'wn'], // turn right
+      [-46, 60, 282, 312, 'sn'],
+      // ---- from here on the gaps are 42
+      [102, 160, 250, 370, 'es'], // turn forward
+      [80, 150, 412, 472, 'en'], // turn left
+      [-20, 38, 425, 460, 'sn'],
+      [-120, -62, 400, 500, 'ws'], // turn forward
+      [-110, -50, 542, 600, 'we'],
       // dead ends / side blocks
-      [-136, -118, 60, 190],
-      [52, 76, 60, 110],
-      [94, 126, 70, 130],
-      [60, 80, 140, 190],
-      [-136, -118, 320, 420],
-      [100, 136, 414, 470],
+      [70, 110, 90, 150],
+      [130, 165, 120, 170],
+      [-165, -150, 160, 260],
+      [100, 150, 510, 560],
       [-W, W, s.len - 50, s.len], // ledge in front of the Stage 6 door
     ];
     for (const [x0, x1, d0, d1] of plats) {
@@ -892,65 +1006,313 @@ export class StageCourse {
     }
     // Only in the middle of wide dead-end blocks: a cactus beside a rim leaves a gap
     // narrower than the kart, which wedges it and makes it shake.
-    for (const [x, d] of [[110, 100], [118, 442]]) cactusAt(x, d);
+    for (const [x, d] of [[148, 145], [125, 535]]) cactusAt(x, d);
   }
 
 
-  // Stage 6 (reference recording): a straight brick road from door to door between
-  // tall blue walls. Huge red blocks, the full width of the road, slide forward and
-  // back along it; they can't be jumped and touching one sends you back. Safe bays
-  // are cut into both walls at intervals: wait in a bay while a block passes, then
-  // race it to the next bay. The blocks move as one wave (each a little ahead of
-  // the one before) so they never overlap. Timing (simulated): the starting kart
-  // (~19 units/s) gets about 1.2 s to leave each bay; faster karts get more.
+  // Stage 6 (reference recording): a long straight brick road from door to door
+  // between tall blue walls. ONE huge red block, the full width of the road, rushes
+  // back and forth along it with white wind streaks; it can't be jumped and
+  // touching it sends you back to the starting place. Long, deep safe bays are cut
+  // into the walls in a zig-zag (3 left, 3 right): wait in a bay while the block
+  // rushes past, then race it to the next one. Tuned so you need a Junior Kart with
+  // 600 Speed (see CORRIDOR).
   buildCorridor(s, zMid) {
     const S = s.startZ;
     const RW = CORRIDOR.roadHalf; // road half width; bays run from RW out to s.hw
     const hw = s.hw;
     const WALL = '#7d9be6';
     this.floor(s, BRICK);
-    const bays = CORRIDOR.bays; // bay centres (distance into the stage)
+    const { bays, sides } = CORRIDOR;
     const BAY = CORRIDOR.bayLen / 2;
-    // Solid inner walls between the bays (the end of the stage stays open for the pads)
-    const spans = [];
-    let d = 0;
-    for (const b of bays) {
-      spans.push([d, b - BAY]);
-      d = b + BAY;
-    }
-    for (const [d0, d1] of spans) {
-      const len = d1 - d0;
-      const zc = S - (d0 + d1) / 2;
-      for (const sx of [-1, 1]) {
+    const open = bays[bays.length - 1] + BAY; // past the last bay the stage opens up for the pads
+    // Solid inner walls on each side, broken only by that side's bays
+    for (const sx of [-1, 1]) {
+      let d = 0;
+      const spans = [];
+      bays.forEach((b, i) => {
+        if (sides[i] !== sx) return;
+        spans.push([d, b - BAY]);
+        d = b + BAY;
+      });
+      spans.push([d, open]);
+      for (const [d0, d1] of spans) {
+        if (d1 - d0 < 1) continue;
+        const len = d1 - d0;
+        const zc = S - (d0 + d1) / 2;
         const x = sx * (RW + (hw - RW) / 2);
         this.add(studBox(hw - RW, WALL_H_CORRIDOR, len, WALL, { unit: 6, cells: 4, style: 'dot', cast: false }), x, WALL_H_CORRIDOR / 2, zc);
         this.collision.addBox(x, zc, hw - RW, len);
         // light inset panel and dark lines on the road-facing side
-        const fx = sx * (RW - 0.3);
-        this.add(studBox(0.6, 20, len - 6, '#a9bdf0', { unit: 6, cells: 4, style: 'dot', cast: false }), fx, 16, zc);
+        if (len > 10) this.add(studBox(0.6, 20, len - 6, '#a9bdf0', { unit: 6, cells: 4, style: 'dot', cast: false }), sx * (RW - 0.3), 16, zc);
         for (const [y, h] of wallLines(WALL_H_CORRIDOR)) if (y > 28) this.add(studBox(0.8, h, len, darker(WALL), { unit: 6, cells: 4, style: 'dot', cast: false }), sx * (RW - 0.4), y, zc);
       }
     }
-    // Red blocks: block k sweeps from just behind bay k to just past bay k+1.
+    // The red block, with white wind streaks trailing behind it when it rushes
     const mat = plainMaterial('#ff1f2a', { emissive: new THREE.Color('#c00010'), emissiveIntensity: 0.35 });
-    for (let k = 0; k < bays.length - 1; k++) {
-      const mesh = dyn(new THREE.Mesh(new THREE.BoxGeometry(RW * 2 - 1, CORRIDOR.ramH, CORRIDOR.ramHD * 2), mat));
-      mesh.castShadow = true;
-      mesh.position.set(0, CORRIDOR.ramH / 2, S - (bays[k] + bays[k + 1]) / 2);
-      this.root.add(mesh);
-      this.rams.push({
-        mesh,
-        S,
-        mid: (bays[k] + bays[k + 1]) / 2,
-        amp: (bays[k + 1] - bays[k]) / 2 + CORRIDOR.overshoot,
-        phase: -k * CORRIDOR.waveLead,
-      });
+    const W = RW * 2 - 1;
+    const H = CORRIDOR.ramH;
+    const D = CORRIDOR.ramHD * 2;
+    const g = dyn(new THREE.Group());
+    const box = new THREE.Mesh(new THREE.BoxGeometry(W, H, D), mat);
+    box.position.y = H / 2;
+    box.castShadow = true;
+    g.add(box);
+    const windMat = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, depthWrite: false });
+    const wind = new THREE.Group();
+    const streak = new THREE.BoxGeometry(0.35, 0.35, 1);
+    streak.translate(0, 0, 0.5); // grows away from the block face
+    const spots = [];
+    for (let i = 0; i < 9; i++) spots.push([-W / 2 + 2 + ((W - 4) * i) / 8, H + 1.2 + (i % 2) * 1.5]); // over the top
+    for (const sx of [-1, 1]) for (let i = 0; i < 6; i++) spots.push([sx * (W / 2 + 1 + (i % 2)), 3 + ((H - 6) * i) / 5]); // down both sides
+    for (const [x, y] of spots) {
+      const m = new THREE.Mesh(streak, windMat);
+      m.position.set(x, y, 0);
+      m.userData.jit = 0.6 + ((((Math.sin(x * 12.9 + y * 78.2) * 43758.5) % 1) + 1) % 1) * 0.8; // varied lengths
+      wind.add(m);
     }
+    g.add(wind);
+    g.position.set(0, 0, S - CORRIDOR.from);
+    this.root.add(g);
+    this.rams.push({ mesh: g, wind, windMat, S, lastZ: null });
+    // Sign at the entrance
+    this.add(label([fred('Need Junior Kart', 64, '#ffe21a', '#2a2000'), { text: '+ 600 Speed', size: 46, font: FONTS.montserrat, weight: 800, fill: '#ffffff', stroke: '#141833', strokeWidth: 7 }], 6.5), 0, 24, S - 30);
+  }
+
+  // Blocky ground that follows the road height, built like the Stage 2 hill road:
+  // thick studded slabs tilted segment by segment on studded supports that reach
+  // down into the magma, with raised curbs along the edges.
+  //   kind 'road'  : dark brown slabs, black curbs on both edges
+  //   kind 'bay'   : lighter brown blocks beside the road (curb on the outer edge)
+  //   kind 'flat'  : flat platform (start hilltop / finish plateau)
+  hillStrip(x0, x1, d0, d1, S, kind = 'road', outer = 0, collide = true) {
+    const w = x1 - x0;
+    const cx = (x0 + x1) / 2;
+    const top = kind === 'bay' ? '#b07a5c' : '#8a5a48';
+    const sup = '#2e1c15';
+    const opt = { unit: 2.6, cells: 2, style: 'dot', cast: false };
+    const seg = kind === 'road' ? 10 : kind === 'bay' ? (d1 - d0) / 2 : d1 - d0;
+    const n = Math.max(1, Math.round((d1 - d0) / seg));
+    for (let k = 0; k < n; k++) {
+      const a0 = d0 + ((d1 - d0) * k) / n;
+      const a1 = d0 + ((d1 - d0) * (k + 1)) / n;
+      const h0 = finalHeight(a0);
+      const h1 = finalHeight(a1);
+      const zc = S - (a0 + a1) / 2;
+      const tilt = Math.atan2(h1 - h0, a1 - a0);
+      const len = Math.hypot(a1 - a0, h1 - h0) + 0.3;
+      // top slab
+      const slab = studBox(w, 1.2, len, top, { unit: 6, cells: 4, style: 'dot', cast: false });
+      slab.rotation.x = tilt;
+      slab.position.set(cx, (h0 + h1) / 2 - 0.6, zc);
+      this.root.add(slab);
+      // support down to the magma
+      const supH = Math.min(h0, h1) - FINAL.lavaY;
+      if (supH > 0.5) this.add(studBox(w + 0.8, supH, a1 - a0 + 0.02, sup, { ...opt, emissive: 0x2a0800, emissiveIntensity: 0.25 }), cx, FINAL.lavaY + supH / 2 - 1, zc);
+      // curbs
+      // (no road curb where a bay opens off the road)
+      const atBay = kind === 'road' && FINAL.bays.some((b) => a1 > b - FINAL.bayLen / 2 && a0 < b + FINAL.bayLen / 2);
+      const curbs = kind === 'road' ? (atBay ? [] : [x0 + 0.8, x1 - 0.8]) : kind === 'bay' ? [outer < 0 ? x0 + 0.8 : x1 - 0.8] : [];
+      for (const x of curbs) {
+        const c = studBox(1.6, 1.6, len, '#4a4d58', opt);
+        c.rotation.x = tilt;
+        c.position.set(x, (h0 + h1) / 2 + 0.6, zc);
+        this.root.add(c);
+      }
+    }
+    // the kart drives on the smooth height
+    if (collide) this.collision.addCurve(x0, x1, S - d1, S - d0, (z) => finalHeight(S - z));
+  }
+
+  // Stage 7 (final, from the description): start on a hilltop at the Stage 6
+  // door, then a very long road over hill after hill to a golden trophy. Magma pits
+  // on both sides (fall in = back to the starting place). Huge iron balls roll down
+  // the road toward you and can't be seen behind the hilltops; hide in the bays
+  // beside the road. Bay gaps are tuned so only a Pro Kart gets through (FINAL).
+  // Tall brown/black walls with glowing red cracks and black spikes. Cross the
+  // finish line for a big confetti burst, then you go back to the starting place.
+  buildFinal(s, zMid) {
+    const S = s.startZ;
+    const hw = s.hw;
+    const RW = FINAL.roadHalf;
+    // Magma everywhere below
+    const lava = new THREE.Mesh(new THREE.BoxGeometry(hw * 2 + 6, 1, s.len + 2), magmaMat((hw * 2 + 6) / 60, (s.len + 2) / 60));
+    lava.position.set(0, FINAL.lavaY - 0.5, zMid);
+    this.root.add(lava);
+
+    // Road, start hilltop, finish plateau and the bays (all follow the hills)
+    // the road, broken by the jump gaps (the ground height still runs across each
+    // gap so a jumping kart keeps its height; landing in a gap = the magma)
+    const JL = FINAL.jumpLen / 2;
+    const roadPieces = [];
+    let rd = 0;
+    for (const j of FINAL.jumps) {
+      roadPieces.push([rd, j - JL]);
+      rd = j + JL;
+    }
+    roadPieces.push([rd, s.len]);
+    for (const [a, b] of roadPieces) this.hillStrip(-RW, RW, a, b, S, 'road', 0, false);
+    this.collision.addCurve(-RW, RW, S - s.len, S, (z) => finalHeight(S - z));
+    this.hillStrip(-hw, -RW, 0, 40, S, 'flat');
+    this.hillStrip(RW, hw, 0, 40, S, 'flat');
+    this.hillStrip(-hw, -RW, FINAL.finish, s.len, S, 'flat');
+    this.hillStrip(RW, hw, FINAL.finish, s.len, S, 'flat');
+    const BL = FINAL.bayLen / 2;
+    const plats = [
+      ...roadPieces.map(([a, b]) => [-RW, RW, a, b]),
+      [-hw, hw, 0, 40],
+      [-hw, hw, FINAL.finish, s.len],
+    ];
+    for (const b of FINAL.bays) {
+      for (const sx of [-1, 1]) {
+        const xa = sx < 0 ? -RW - FINAL.bayWide : RW;
+        const xb = sx < 0 ? -RW : RW + FINAL.bayWide;
+        this.hillStrip(xa, xb, b - BL, b + BL, S, 'bay', sx);
+        plats.push([xa, xb, b - BL, b + BL]);
+      }
+    }
+    // magma = anywhere that isn't road, a bay or a plateau
+    this.lavaFields.push({ z0: S, z1: S - s.len, plats: plats.map(([x0, x1, d0, d1]) => [x0, x1, S - d1, S - d0]) });
+
+    // Walls: magma-covered inner faces (static) and black spikes
+    const WALL_H = s.wallH || BASE_WALL_H;
+    const spikeMat = plainMaterial('#140c0a');
+    const spikeGeo = new THREE.ConeGeometry(2.2, 9, 5);
+    const rr = (i) => ((Math.sin(i * 47.3 + 5.1) * 43758.5453) % 1 + 1) % 1;
+    let k = 0;
+    const wallMagma = magmaMat((s.len + 2) / 60, (WALL_H - FINAL.lavaY) / 60);
+    for (const sx of [-1, 1]) {
+      const face = new THREE.Mesh(new THREE.PlaneGeometry(s.len + 2, WALL_H - FINAL.lavaY), wallMagma);
+      face.rotation.y = -sx * Math.PI / 2; // face the road
+      face.position.set(sx * (hw - 0.05), (WALL_H + FINAL.lavaY) / 2, zMid);
+      this.root.add(face);
+      for (let d = 10; d < s.len; d += 46) {
+        // spikes sticking out of the wall
+        if (rr(++k) > 0.35) {
+          const sp = new THREE.Mesh(spikeGeo, spikeMat);
+          sp.rotation.z = (sx * Math.PI) / 2;
+          sp.position.set(sx * (hw - 4), 30 + rr(++k) * (WALL_H - 60), S - d - 20);
+          this.root.add(sp);
+        }
+      }
+    }
+
+    // No ceiling: very tall walls, so only a strip of sky shows far above
+    // Close the gap between the narrow Stage 6 door and this wide hall
+    const fillW = hw + 6 - 60;
+    for (const sx of [-1, 1]) {
+      this.add(studBox(fillW, WALL_H - FINAL.lavaY + 10, 24, '#2e1c15', { unit: 6, cells: 4, style: 'dot', cast: false }), sx * (60 + fillW / 2), (WALL_H + FINAL.lavaY - 10) / 2, S + 12);
+    }
+
+    // Iron balls
+    const ballMat = new THREE.MeshLambertMaterial({ color: '#3b3f4c', flatShading: true, map: studMaterial('#ffffff', { cells: 2, style: 'dot', contrast: 0.5 }).map });
+    const ballGeo = new THREE.IcosahedronGeometry(FINAL.ballR, 2);
+    for (let i = 0; i < FINAL.balls; i++) {
+      const mesh = dyn(new THREE.Mesh(ballGeo, ballMat));
+      mesh.castShadow = true;
+      this.root.add(mesh);
+      this.balls.push({ mesh, i, S });
+    }
+
+    // Giant golden trophy at the finish (not fogged, so it shows from far away)
+    // shiny gold: strong specular highlights
+    const gold = new THREE.MeshPhongMaterial({ color: '#ffc81e', specular: '#fff4b0', shininess: 110, emissive: '#7a4800', emissiveIntensity: 0.45, fog: false, side: THREE.DoubleSide });
+    const goldDark = new THREE.MeshPhongMaterial({ color: '#e0a010', specular: '#ffe9a0', shininess: 80, emissive: '#5a3200', emissiveIntensity: 0.4, fog: false });
+    const trophy = new THREE.Group();
+    const part = (geo, mat, y, rx = 0) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.y = y;
+      m.rotation.x = rx;
+      trophy.add(m);
+      return m;
+    };
+    part(new THREE.BoxGeometry(30, 8, 30), goldDark, 4);
+    part(new THREE.BoxGeometry(22, 6, 22), gold, 11);
+    part(new THREE.CylinderGeometry(3.5, 6, 22, 16), gold, 25);
+    part(new THREE.CylinderGeometry(9, 4, 6, 20), goldDark, 38);
+    part(new THREE.CylinderGeometry(22, 10, 34, 24, 1, true), gold, 58);
+    part(new THREE.TorusGeometry(22, 1.6, 8, 32), goldDark, 75, Math.PI / 2);
+    for (const sx of [-1, 1]) {
+      const h = new THREE.Mesh(new THREE.TorusGeometry(9, 2.2, 8, 20, Math.PI * 1.2), gold);
+      h.position.set(sx * 21, 60, 0);
+      h.rotation.z = sx < 0 ? Math.PI * 0.4 : Math.PI * 0.6;
+      trophy.add(h);
+    }
+    const star = new THREE.Mesh(new THREE.OctahedronGeometry(7), new THREE.MeshBasicMaterial({ color: '#fff3a0', fog: false }));
+    star.position.y = 86;
+    trophy.add(star);
+    trophy.scale.setScalar(0.75); // fits a normal view
+    const TD = FINAL.finish + 55;
+    trophy.position.set(0, finalHeight(TD), S - TD);
+    this.root.add(trophy);
+    this.collision.addCircle(0, S - TD, 12);
+    // Gold finish: a gold line across the road under a gold FINISH arch
+    const fy = finalHeight(FINAL.finish);
+    const fz = S - FINAL.finish;
+    const line = new THREE.Mesh(new THREE.BoxGeometry(RW * 2, 0.4, 4), gold);
+    line.position.set(0, fy + 0.2, fz);
+    this.root.add(line);
+    for (const sx of [-1, 1]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(4, 34, 4), gold);
+      post.position.set(sx * (RW + 3), fy + 17, fz);
+      this.root.add(post);
+    }
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(RW * 2 + 10, 7, 5), goldDark);
+    beam.position.set(0, fy + 36, fz);
+    this.root.add(beam);
+    const finishText = label([fred('FINISH', 90, '#fff3a0', '#7a4a00')], 6.5);
+    finishText.position.set(0, fy + 36, fz + 3);
+    this.root.add(finishText);
+    // Jump gaps: glowing yellow/black take-off edge and a floating JUMP! sign
+    const stripeY = plainMaterial('#ffd21c', { emissive: new THREE.Color('#ffb000'), emissiveIntensity: 0.6 });
+    const stripeK = plainMaterial('#141414');
+    for (const j of FINAL.jumps) {
+      const d0 = j - JL;
+      const h = finalHeight(d0);
+      for (let i = 0; i < 10; i++) {
+        const st = new THREE.Mesh(new THREE.BoxGeometry(RW * 0.2, 0.5, 2.4), i % 2 ? stripeK : stripeY);
+        st.position.set(-RW + RW * 0.1 + i * RW * 0.2, h + 0.2, S - d0 + 1.2);
+        this.root.add(st);
+      }
+      this.add(label([fred('JUMP!', 80, '#ffe21a', '#5a2a00')], 6), 0, finalHeight(j) + 26, S - j);
+    }
+
+    // Sign at the entrance
+    this.add(label([fred('Final Stage', 70, '#ffe21a', '#2a2000'), { text: 'Need Pro Kart', size: 46, font: FONTS.montserrat, weight: 800, fill: '#ffffff', stroke: '#141833', strokeWidth: 7 }], 7), 0, 40, S - 30);
+  }
+
+  // distance into the stage of iron ball b at time t (seconds)
+  ballD(b, t) {
+    const travel = FINAL.ballTop - FINAL.ballBottom;
+    const u = (((t * FINAL.ballSpeed + (b.i * travel) / FINAL.balls) % travel) + travel) % travel;
+    return FINAL.ballTop - u;
   }
 
   // z of a red corridor block at time t (seconds)
   ramZ(r, t) {
-    return r.S - (r.mid + r.amp * Math.sin(t * CORRIDOR.speed + r.phase));
+    // back and forth at a steady rush between CORRIDOR.from and CORRIDOR.to
+    const L = CORRIDOR.to - CORRIDOR.from;
+    const u = (((t * CORRIDOR.speed) % (2 * L)) + 2 * L) % (2 * L);
+    return r.S - (CORRIDOR.from + (u < L ? u : 2 * L - u));
+  }
+
+  updateRam(r, t, dt) {
+    const z = this.ramZ(r, t);
+    const v = r.lastZ === null || dt <= 0 ? 0 : (z - r.lastZ) / dt;
+    r.lastZ = z;
+    r.mesh.position.z = z;
+    // wind streaks trail behind the block; fade in above ~10 units/s
+    const sp = Math.abs(v);
+    const k = Math.min(1, Math.max(0, (sp - 10) / 120));
+    r.windMat.opacity = 0.75 * k;
+    r.wind.visible = k > 0.01;
+    if (!r.wind.visible) return;
+    const dir = v < 0 ? 1 : -1; // a block moving toward -z trails toward +z
+    const half = CORRIDOR.ramHD;
+    for (const m of r.wind.children) {
+      m.position.z = dir * half;
+      m.scale.z = dir * (4 + sp * 0.12 * m.userData.jit);
+    }
   }
 
 
@@ -1015,7 +1377,9 @@ export class StageCourse {
     const z0 = s.endZ; // front face
     const zc = z0 - COURSE.gateDepth / 2;
     const last = s.n === STAGES.length;
-    const frame = (w, h, d, c = '#93a9de') => studBox(w, h, d, c, { unit: 6, cells: 4, style: 'dot' });
+    const dark = s.theme === 'final'; // the final hall's door is dark rock with gold trim
+    const GATE = dark ? '#2e1c15' : '#93a9de';
+    const frame = (w, h, d, c = GATE) => studBox(w, h, d, c, { unit: 6, cells: 4, style: 'dot' });
     const half = 40; // 80-wide opening
     const openH = 54; // tall opening
     const topH = Math.max(s.wallH || WALL_H, STAGES[s.n]?.wallH || WALL_H); // gates always reach the top of the walls
@@ -1023,22 +1387,23 @@ export class StageCourse {
       const sw = (s.hw ?? HW) + 3 - half;
       this.add(frame(sw, topH, COURSE.gateDepth), sx * (half + sw / 2), topH / 2, zc);
       this.collision.addBox(sx * (half + sw / 2), zc, sw, COURSE.gateDepth);
-      this.add(frame(0.8, openH, COURSE.gateDepth, '#3a62c8'), sx * (half - 0.4), openH / 2, zc);
+      this.add(frame(0.8, openH, COURSE.gateDepth, dark ? '#d99a12' : '#3a62c8'), sx * (half - 0.4), openH / 2, zc);
     }
     this.add(frame(half * 2, topH - openH, COURSE.gateDepth), 0, openH + (topH - openH) / 2, zc);
     // Darker lines across the gate wall face (around the opening)
     const gw = (s.hw ?? HW) + 3;
-    const line = (w, h, x, y) => this.add(studBox(w, h, 0.8, darker('#93a9de'), { unit: 6, cells: 4, style: 'dot', cast: false }), x, y, z0 + 0.4);
+    const line = (w, h, x, y) => this.add(studBox(w, h, 0.8, darker(GATE), { unit: 6, cells: 4, style: 'dot', cast: false }), x, y, z0 + 0.4);
     for (const [y, h] of wallLines(topH)) {
       if (y - h / 2 > openH) line(gw * 2, h, 0, y);
       else for (const sx of [-1, 1]) line(gw - half - 0.8, h, sx * (half + 0.8 + (gw - half - 0.8) / 2), y);
     }
-    this.add(plainBox(half * 2 - 0.2, 2, 0.4, '#1f8cff', { emissive: new THREE.Color('#1f8cff'), emissiveIntensity: 0.9 }), 0, openH - 1.2, z0 - 0.8);
+    const glow = dark ? '#ffb020' : '#1f8cff';
+    this.add(plainBox(half * 2 - 0.2, 2, 0.4, glow, { emissive: new THREE.Color(glow), emissiveIntensity: 0.9 }), 0, openH - 1.2, z0 - 0.8);
     this.add(studBox(half * 2, 0.4, COURSE.gateDepth + 2, ROAD, { unit: 6, cells: 4, style: 'dot', cast: false }), 0, -0.1, zc);
     this.add(seeThrough(half * 2, openH - 2.4), 0, (openH - 2.4) / 2, z0 - 1.2);
     if (last) {
       // The end of World 1: a closed gate.
-      this.add(plainBox(half * 2, openH, 1, '#3a2a7a', { emissive: new THREE.Color('#2a1a6a'), emissiveIntensity: 0.5 }), 0, openH / 2, z0 - 3);
+      this.add(plainBox(half * 2, openH, 1, dark ? '#1a0f0b' : '#3a2a7a', { emissive: new THREE.Color(dark ? '#3a1200' : '#2a1a6a'), emissiveIntensity: 0.5 }), 0, openH / 2, z0 - 3);
       this.collision.addBox(0, z0 - 3, half * 2, 2);
     }
     if (s.n === 1) {
@@ -1164,7 +1529,13 @@ export class StageCourse {
     if (camera) fadeNear(this.fadeLabels, camera.position);
     for (const sp of this.spinners) sp.pivot.rotation.y = t * sp.speed + sp.phase;
     for (const sl of this.sliders) sl.mesh.position.x = Math.sin(t * sl.speed + sl.phase) * sl.amp;
-    for (const r of this.rams) r.mesh.position.z = this.ramZ(r, t);
+    for (const r of this.rams) this.updateRam(r, t, dt);
+    for (const b of this.balls) {
+      const d = this.ballD(b, t);
+      b.mesh.visible = d > FINAL.ballBottom + 4;
+      b.mesh.position.set(0, finalHeight(d) + FINAL.ballR, b.S - d);
+      b.mesh.rotation.x = -d / FINAL.ballR; // rolls toward the start
+    }
     for (const sec of this.spikeSections) this.updateSpikeSection(sec, t);
     for (const b of this.beams) {
       const st = this.beamState(b, t);
@@ -1243,6 +1614,9 @@ export class StageCourse {
     for (const sl of this.sliders) {
       const sx = Math.sin(t * sl.speed + sl.phase) * sl.amp;
       if (Math.abs(x - sx) < sl.hw + R * 0.6 && Math.abs(z - sl.z) < sl.hd + R * 0.6) return 'wall';
+    }
+    for (const b of this.balls) {
+      if (Math.abs(x) < FINAL.roadHalf + 4 && Math.abs(z - (b.S - this.ballD(b, t))) < FINAL.ballR + R * 0.6) return 'ball';
     }
     for (const r of this.rams) {
       // the bays (|x| beyond the road) are safe; jumping doesn't clear a block

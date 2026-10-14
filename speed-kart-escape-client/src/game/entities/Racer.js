@@ -19,6 +19,7 @@ export class Racer {
     this.kart.root.add(this.avatar.root);
     this.exhaust = new ExhaustFire(this.kart.root);
     this.exhaust.attachSparks(scene);
+    this.exhaust.setStyle(kart);
     this.wind = new WindStreaks(this.root);
     this.trail = new Trail(scene);
     this.trail.setTrail(trail);
@@ -56,7 +57,10 @@ export class Racer {
   }
 
   setKart(id) {
-    if (id && id !== this.kart.kartId) this.kart.build(id);
+    if (id && id !== this.kart.kartId) {
+      this.kart.build(id);
+      this.exhaust.setStyle(id);
+    }
   }
 
   setTrail(id) {

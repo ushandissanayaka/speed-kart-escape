@@ -26,6 +26,7 @@ import {
   merchantStatus,
   newProfile,
   stageAt,
+  stageDef,
   stageHW,
   stagePads,
   stageRespawn,
@@ -88,7 +89,7 @@ export class Game {
     this.world = new StartingPlace(this.scene);
     this.input = new Input();
     this.rig = new CameraRig(this.camera, renderer.domElement);
-    this.rig.bounds = { minX: -193, maxX: 193, minZ: -3180, maxZ: 54.5 };
+    this.rig.bounds = { minX: -193, maxX: 193, minZ: -5640, maxZ: 54.5 };
     this.controller = new KartController(this.world.collision);
     this.confetti = new Confetti(this.scene);
 
@@ -298,8 +299,8 @@ export class Game {
   die(cause) {
     if (this.dead) return;
     sfx.dead();
-    // Logs knock you all the way back to the starting place.
-    const toSpawn = cause === 'beam' || cause === 'spike' || cause === 'pit';
+    // Dying in any stage sends you all the way back to the starting place.
+    const toSpawn = true;
     this.dead = { until: performance.now() + DEATH_WAIT_MS, stage: Math.max(1, this.stage), cause, toSpawn };
     if (cause === 'pit') this.fall = { y: 0, v: 0 }; // drop down into the lava
     this.controller.v = 0;
@@ -353,19 +354,24 @@ export class Game {
       if (r.error) this.events.emit('toast', { text: r.error, kind: 'bad' });
       return;
     }
-    if (r.teleport === 'spawn') sfx.trophy();
+    if (r.teleport === 'spawn') (this.bigFinish ? sfx.victory() : sfx.trophy());
     else sfx.reward();
     if (r.toast) this.events.emit('toast', { text: r.toast, kind: 'good' });
     if (r.teleport === 'spawn') {
       // Trophy + confetti burst, then back to the starting place.
-      this.events.emit('win', { text: r.toast });
-      this.confetti?.burst(this.player.root.position);
+      const final = this.bigFinish;
+      this.bigFinish = false;
+      this.events.emit('win', { text: r.toast, final });
+      if (final) {
+        // the final stage: wave after wave of big confetti
+        for (const ms of [0, 400, 800, 1200, 1700, 2300, 3000]) setTimeout(() => this.confetti?.burst(this.player.root.position, 600, 2.2), ms);
+      } else this.confetti?.burst(this.player.root.position, 260);
       this.controller.v = 0;
       this.celebrating = true;
       setTimeout(() => {
         this.celebrating = false;
         this.respawn();
-      }, 2400);
+      }, final ? 5200 : 2400);
     } else if (r.teleport) {
       this.teleport(r.teleport);
       this.shieldUntil = performance.now() + SHIELD_MS;
@@ -377,6 +383,15 @@ export class Game {
     const s = stageAt(c.z);
     if (s > this.stage) this.events.emit('stage', { name: `Stage ${s}` });
     if (s !== this.stage) this.stage = s;
+
+    // Final stage: crossing the finish line wins it (big confetti, then back to the start)
+    const def = s > 0 ? stageDef(s) : null;
+    if (def?.finishD && !this.dead && !this.celebrating && !this.finishSent && c.z <= def.startZ - def.finishD) {
+      this.finishSent = true;
+      this.bigFinish = true;
+      this.stageAction({ type: 'stageWin', stage: s });
+      setTimeout(() => (this.finishSent = false), 3000);
+    }
 
     // Hazards (skipped while dead or shielded)
     const shielded = performance.now() < (this.shieldUntil || 0);

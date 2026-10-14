@@ -2,7 +2,7 @@
 
 import * as THREE from 'three';
 
-const MAX = 260;
+const MAX = 600;
 const COLORS = ['#ff3b5c', '#ffd21c', '#3dff4a', '#2ec5ff', '#b13bff', '#ff8a2a', '#ffffff', '#ff5ccf'].map((c) => new THREE.Color(c));
 
 export class Confetti {
@@ -21,13 +21,15 @@ export class Confetti {
     this.alive = 0;
   }
 
-  burst(origin) {
+  burst(origin, count = 260, size = 1) {
     this.parts.forEach((pt, i) => {
+      if (i >= count) return;
+      pt.size = size;
       pt.life = 2.2 + Math.random() * 0.8;
       pt.p.set(origin.x + (Math.random() - 0.5) * 6, origin.y + 3, origin.z + (Math.random() - 0.5) * 6);
       const a = Math.random() * Math.PI * 2;
-      const sp = 8 + Math.random() * 18;
-      pt.v.set(Math.cos(a) * sp, 22 + Math.random() * 22, Math.sin(a) * sp);
+      const sp = (8 + Math.random() * 18) * Math.sqrt(size);
+      pt.v.set(Math.cos(a) * sp, (22 + Math.random() * 22) * Math.sqrt(size), Math.sin(a) * sp);
       pt.r.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
       pt.w.set((Math.random() - 0.5) * 14, (Math.random() - 0.5) * 14, (Math.random() - 0.5) * 14);
       this.mesh.setColorAt(i, COLORS[i % COLORS.length]);
@@ -53,7 +55,7 @@ export class Confetti {
       }
       this.dummy.position.copy(pt.p);
       this.dummy.rotation.copy(pt.r);
-      this.dummy.scale.setScalar(pt.life > 0 ? Math.min(1, pt.life * 2) : 0);
+      this.dummy.scale.setScalar(pt.life > 0 ? Math.min(1, pt.life * 2) * (pt.size || 1) : 0);
       this.dummy.updateMatrix();
       this.mesh.setMatrixAt(i, this.dummy.matrix);
     });
