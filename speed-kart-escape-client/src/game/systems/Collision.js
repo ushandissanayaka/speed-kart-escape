@@ -58,7 +58,9 @@ export class Collision {
     let hit = false;
     let nx = 0;
     let nz = 0;
-    for (let iter = 0; iter < 2; iter++) {
+    // A few passes so a kart pressed into a corner (two boxes) settles instead of
+    // being pushed back and forth between them every frame.
+    for (let iter = 0; iter < 4; iter++) {
       for (const b of this.boxes) {
         // Into box space (rotation by -ry)
         const dx = x - b.x;

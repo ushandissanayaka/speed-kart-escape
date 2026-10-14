@@ -3,19 +3,18 @@
 //  Stage 1-3  "grass"    dark navy road between green grass, trees, signs, Legion
 //                        screens; swinging brown log bars (2 in stage 1, more and
 //                        faster later, plus sliding logs in stage 3)
-//  Stage 4    "desert"   red-brown brick floor, cactus, fields of red spikes with
-//                        a gap you must drive through
-//  Stage 5    "lava"     orange lava with blue crystal shards; raised brick paths
-//                        and platforms are the only safe ground
-//  Stage 6    "corridor" blue walled corridor with sliding red walls and floating
-//                        cyan orbs
+//  Stage 4    "pits"     brick floor crossed by full-width sunken lava pits to jump
+//  Stage 5    "lava"     big lava room: jump between brick blocks along a zig-zag
+//                        route marked by dark brown rims
+//  Stage 6    "corridor" straight road between tall walls; full-width red blocks
+//                        slide back and forth, hide in the side bays
 //
 // Every stage ends at a gate with a purple "Skip Stage" pad, a yellow "+N Wins /
 // Return" pad and a 250-coin safe. Hazards are deterministic functions of the
 // clock so every player sees them in the same place.
 
 import * as THREE from 'three';
-import { studBox, plainBox, checkerBox, studMaterial, boxUVs } from '../util/textures.js';
+import { studBox, plainBox, checkerBox, studMaterial, plainMaterial, boxUVs } from '../util/textures.js';
 import { textSprite, FONTS } from '../util/text.js';
 import { makeBillboard } from './Billboard.js';
 import { makeTree } from './Scenery.js';
@@ -33,6 +32,26 @@ const STONE = { light: '#c3c8ee', dark: '#b3b9e4', shadow: '#8392d4', highlight:
 const WALL_BLUE = '#6b8de0';
 const SAND_WALL = '#8e6f9a';
 const LOG = '#7a4a3a';
+const WALL_H_CORRIDOR = 80;
+// Stage 6 corridor layout and red block timing (see buildCorridor)
+const CORRIDOR = {
+  roadHalf: 30,
+  bays: [60, 140, 220, 300, 380, 460],
+  bayLen: 26,
+  ramH: 30,
+  ramHD: 8, // half depth of a red block along the road
+  overshoot: 22, // how far a block runs past the bays at each end
+  speed: 0.48, // rad/s: ~13 s per round trip, up to ~30 units/s
+  waveLead: 0.5, // each block runs a little ahead of the one before it
+};
+
+// Horizontal dark lines up a wall face: [centreY, height], a thick band then a thin line.
+function wallLines(h) {
+  const out = [];
+  for (let y = 12, i = 0; y < h - 4; y += 14, i++) out.push([y, i % 2 ? 1 : 2.2]);
+  return out;
+}
+const darker = (c) => '#' + new THREE.Color(c).multiplyScalar(0.72).getHexString();
 
 const dyn = (o) => {
   o.userData.dynamic = true;
@@ -60,9 +79,9 @@ function seeThrough(w, h) {
 
 function coinMesh() {
   const g = new THREE.Group();
-  const rim = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 0.5, 24), new THREE.MeshLambertMaterial({ color: '#ffc21a', emissive: '#d98a00', emissiveIntensity: 0.8 }));
+  const rim = new THREE.Mesh(new THREE.CylinderGeometry(3.5, 3.5, 0.9, 28), new THREE.MeshLambertMaterial({ color: '#ffc21a', emissive: '#d98a00', emissiveIntensity: 0.8 }));
   rim.rotation.x = Math.PI / 2;
-  const face = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.05, 0.56, 24), new THREE.MeshLambertMaterial({ color: '#ffe36a', emissive: '#e8b000', emissiveIntensity: 0.7 }));
+  const face = new THREE.Mesh(new THREE.CylinderGeometry(2.3, 2.3, 1, 28), new THREE.MeshLambertMaterial({ color: '#ffe36a', emissive: '#e8b000', emissiveIntensity: 0.7 }));
   face.rotation.x = Math.PI / 2;
   g.add(rim, face);
   return dyn(g);
@@ -148,6 +167,7 @@ export class StageCourse {
     this.spikeSections = []; // stage 3 pop-up spike fields
     this.beams = []; // logs sliding along z: { mesh, x, z0, z1, speed, phase, hw, top }
     this.orbs = []; // { mesh, z, amp, speed, phase, y }
+    this.rams = []; // stage 6 red blocks sliding along the road
     this.spikeRects = []; // [minX, maxX, minZ, maxZ]
     this.coins = []; // { def, mesh, hiddenUntil }
     this.arrows = [];
@@ -205,13 +225,16 @@ export class StageCourse {
     const theme = s.theme;
     const wallX = (s.hw ?? HW) + 3;
     const WALL_H = s.wallH || BASE_WALL_H;
-    const wallColor = theme === 'grass' ? WALL_BLUE : theme === 'corridor' ? '#7d9be6' : SAND_WALL;
+    const wallColor = theme === 'grass' || theme === 'lava' ? WALL_BLUE : theme === 'corridor' ? '#7d9be6' : SAND_WALL;
 
-    // Side walls + top rim (studded, tall like the plaza walls)
+    // Side walls + top rim (studded, tall like the plaza walls). On raised stages
+    // the walls reach down past the lava pits so no sky shows under them.
+    const yLow = s.baseY ? -40 : 0;
     for (const sx of [-1, 1]) {
-      this.add(studBox(6, WALL_H, len, wallColor, { unit: 6, cells: 4, style: 'dot', cast: false }), sx * wallX, WALL_H / 2, zc);
+      this.add(studBox(6, WALL_H - yLow, len, wallColor, { unit: 6, cells: 4, style: 'dot', cast: false }), sx * wallX, (WALL_H + yLow) / 2, zc);
       this.add(studBox(8, 2, len, '#86a3e6', { unit: 6, cells: 4, style: 'dot', cast: false }), sx * wallX, WALL_H + 1, zc);
       this.collision.addBox(sx * wallX, zc, 6, len);
+      for (const [y, h] of wallLines(WALL_H)) this.add(studBox(0.8, h, len, darker(wallColor), { unit: 6, cells: 4, style: 'dot', cast: false }), sx * (wallX - 3.4), y, zc);
     }
 
     if (theme === 'pits') this.buildStage4(s, zMid);
@@ -681,58 +704,43 @@ export class StageCourse {
     for (const sl of sec.slabs) sl.visible = !calm;
   }
 
-  // Stage 4 (reference recording): brown brick floor with sunken orange lava pits.
-  // Long lava channels run along both sides of two raised safe blocks (drive along
-  // the block), and three full-width pits have to be jumped (Space) right at the
-  // edge. Drop into lava and you're sent back to the starting place. Stepped mauve
-  // rock ledges line both walls.
+  // Stage 4 (reference recording): one wide brick checker floor crossed by long
+  // sunken lava pits. Each pit runs the full width between the rock ledges, so
+  // every one has to be jumped (Space) right at the edge. Drop into lava and
+  // you're sent back to the starting place. Stepped mauve rock ledges line both walls.
   buildStage4(s, zMid) {
-    // No path through the middle: separate brick platforms over deep lava. Every
-    // gap must be jumped (Space). Fall in and you go back to the starting place.
     const hw = s.hw;
     const S = s.startZ;
     const EDGE = hw - 26;
     const BRICK4 = { light: '#a86a5c', dark: '#9a5e52', shadow: '#7a4a40', highlight: 'rgba(255,220,200,0.35)' };
     const DEPTH = 34;
-    // Rows of separate blocks: lava strips between the rows, and gaps between the
-    // blocks in each row (nothing is joined). Rows alternate 3 and 2 blocks.
-    const plats = [[-EDGE, EDGE, 0, 30]]; // start
-    // wide lava gaps: you have to jump right from the edge
-    const three = [[-EDGE, -46], [-24, 24], [46, EDGE]];
-    const two = [[-60, -11], [11, 60]];
-    for (let r = 0; r < 6; r++) {
-      const d0 = 46 + r * 66;
-      for (const [x0, x1] of r % 2 ? two : three) plats.push([x0, x1, d0, d0 + 40]);
+    // Lava pits as [d0, d1] distances into the stage; coins sit on the brick between them.
+    const pits = [[36, 60], [90, 114], [150, 174], [214, 238], [282, 306], [350, 374], [410, 434]];
+    // Brick floor = everything between the pits
+    const plats = [];
+    let d = 0;
+    for (const [d0, d1] of pits) {
+      plats.push([-EDGE, EDGE, d, d0]);
+      d = d1;
     }
-    plats.push([-EDGE, EDGE, 442, s.len]); // in front of the Stage 5 door
+    plats.push([-EDGE, EDGE, d, s.len]); // in front of the Stage 5 door
     for (const [x0, x1, d0, d1] of plats) {
       const top = checkerBox(x1 - x0, DEPTH, d1 - d0, BRICK4);
       top.position.set((x0 + x1) / 2, -DEPTH / 2, S - (d0 + d1) / 2);
       this.root.add(top);
     }
-    // Deep lava under everything
+    // Dark blue pit walls and glowing lava at the bottom of each pit
     this.pitLava = new THREE.MeshLambertMaterial({ color: '#ff8a3a', emissive: '#ff6a10', emissiveIntensity: 0.55 });
-    const lava = new THREE.Mesh(new THREE.BoxGeometry(hw * 2 + 6, 1, s.len), this.pitLava);
-    lava.position.set(0, -DEPTH + 1.5, zMid);
-    this.root.add(lava);
-    // Dark blue crystals in the lava
-    const shardMat = new THREE.MeshLambertMaterial({ color: '#1a3cc8', emissive: '#0a1a6a', emissiveIntensity: 0.4 });
-    const rr = (i) => ((Math.sin(i * 91.3 + 7.1) * 43758.5453) % 1 + 1) % 1;
-    for (let i = 0; i < 40; i++) {
-      const x = (rr(i) - 0.5) * EDGE * 2;
-      const d = 30 + rr(i + 50) * (s.len - 70);
-      if (plats.some(([x0, x1, d0, d1]) => x > x0 - 3 && x < x1 + 3 && d > d0 - 3 && d < d1 + 3)) continue;
-      const sh = new THREE.Mesh(new THREE.ConeGeometry(1.4 + rr(i + 9) * 2, 4 + rr(i + 3) * 6, 4), shardMat);
-      sh.position.set(x, -DEPTH + 3, S - d);
-      sh.rotation.set(rr(i + 1) - 0.5, rr(i + 2) * 3, rr(i + 4) - 0.5);
-      this.root.add(sh);
-    }
-    // Cactus on a few platforms
-    for (const [x, d] of [[68, 66], [-34, 132], [68, 198], [34, 264], [-68, 330]]) {
-      const c = cactus();
-      c.scale.setScalar(1.3);
-      this.add(c, x, 0, S - d);
-      this.collision.addCircle(x, S - d, 2.4);
+    const pitWall = new THREE.MeshLambertMaterial({ color: '#1e2c78' });
+    for (const [d0, d1] of pits) {
+      const lava = new THREE.Mesh(new THREE.BoxGeometry(EDGE * 2, 1, d1 - d0), this.pitLava);
+      lava.position.set(0, -DEPTH + 6, S - (d0 + d1) / 2);
+      this.root.add(lava);
+      for (const dd of [d0, d1]) {
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(EDGE * 2, DEPTH - 0.4, 0.4), pitWall);
+        wall.position.set(0, -DEPTH / 2 - 0.2, S - dd + (dd === d0 ? -0.2 : 0.2));
+        this.root.add(wall);
+      }
     }
     for (const sx of [-1, 1]) {
       const side = studBox(hw + 3 - EDGE + 2, DEPTH, s.len + 2, '#8c6a7c', { unit: 2.6, cells: 2, style: 'dot', cast: false });
@@ -791,77 +799,160 @@ export class StageCourse {
     this.root.add(spikes);
   }
 
-  // Stage 5: lava with raised brick paths
+  // Stage 5 (reference recording): a big room of deep orange lava with brick blocks
+  // of many sizes standing in it. The route zig-zags: jump (Space) block to block,
+  // turn left, jump, turn right, jump... Some blocks are dead ends. Blue crystal
+  // shards stick out of the lava. Fall in and you go back to the starting place.
+  // A cactus-lined brick ledge sits at both ends.
   buildLava(s, zMid) {
-    const lavaMat = new THREE.MeshLambertMaterial({ color: '#ff8a2a', emissive: '#ff5a00', emissiveIntensity: 0.55 });
-    const lava = new THREE.Mesh(new THREE.BoxGeometry(HW * 2 + 6, 1, s.len + 2), lavaMat);
-    lava.position.set(0, -0.5, zMid);
-    this.root.add(lava);
-    this.lavaMat = lavaMat;
-    this.lava = [s.endZ, s.startZ];
-    this.cactusRow(s);
-
-    const H = 3;
-    const plat = (x, z, w, d) => {
-      this.add(checkerBox(w, H, d, BRICK), x, H / 2, z);
-      this.collision.addHeight(x - w / 2, x + w / 2, z - d / 2, z + d / 2, H);
-    };
-    // start + finish platforms (full width), with the route between them
-    plat(0, s.startZ - 18, HW * 2, 36);
-    plat(0, s.endZ + 26, HW * 2, 52);
-    const route = [
-      [-24, -60, 26, 50],
-      [6, -92, 70, 20],
-      [34, -130, 26, 60],
-      [8, -170, 66, 20],
-      [-22, -205, 26, 56],
-      [0, -244, 70, 22],
-      [26, -276, 26, 44],
+    const hw = s.hw;
+    const S = s.startZ;
+    const DEPTH = 34;
+    const BRICK5 = { light: '#a86a5c', dark: '#9a5e52', shadow: '#7a4a40', highlight: 'rgba(255,220,200,0.35)' };
+    const W = hw + 3; // lava runs right up to the walls
+    // [x0, x1, d0, d1]: d = distance into the stage
+    const plats = [
+      [-W, W, 0, 40], // start ledge
+      // main route; the last field lists the sides with a dark brown rim
+      // (w/e = -x/+x, s/n = near/far). Only the way in and the way out stay open.
+      // Every gap is 18: the starting kart (~19 units/s) only clears it by
+      // jumping right at the edge.
+      [-32, 32, 58, 118, 'we'],
+      [-30, 40, 136, 186, 'ne'], // turn left
+      [-100, -48, 124, 216, 'ws'],
+      [-112, -56, 234, 300, 'wn'], // turn right
+      [-38, 70, 250, 280, 'sn'],
+      [88, 136, 214, 320, 'es'], // turn forward
+      [70, 130, 338, 396, 'en'], // turn left
+      [-14, 52, 350, 390, 'sn'],
+      [-84, -32, 334, 420, 'ws'], // turn forward
+      [-74, -20, 438, 494, 'we'],
+      // dead ends / side blocks
+      [-136, -118, 60, 190],
+      [52, 76, 60, 110],
+      [94, 126, 70, 130],
+      [60, 80, 140, 190],
+      [-136, -118, 320, 420],
+      [100, 136, 414, 470],
+      [-W, W, s.len - 50, s.len], // ledge in front of the Stage 6 door
     ];
-    for (const [x, dz, w, d] of route) plat(x, s.startZ + dz, w, d);
-    // Blue crystal shards floating in the lava
-    const shardMat = new THREE.MeshLambertMaterial({ color: '#1a3cff', emissive: '#0a1a8a', emissiveIntensity: 0.4 });
-    for (let i = 0; i < 26; i++) {
-      const shard = new THREE.Mesh(new THREE.TetrahedronGeometry(1.4 + (i % 3) * 0.5), shardMat);
-      shard.position.set(((i * 37) % 110) - 55, 0.4, s.startZ - 40 - ((i * 53) % (s.len - 90)));
-      shard.rotation.set(i, i * 2, i * 3);
-      this.root.add(shard);
-      this.collision.addCircle(shard.position.x, shard.position.z, 1.8);
+    for (const [x0, x1, d0, d1] of plats) {
+      const blk = checkerBox(x1 - x0, DEPTH, d1 - d0, BRICK5);
+      blk.position.set((x0 + x1) / 2, -DEPTH / 2, S - (d0 + d1) / 2);
+      this.root.add(blk);
     }
-  }
+    this.lavaFields.push({ z0: S, z1: S - s.len, plats: plats.map(([x0, x1, d0, d1]) => [x0, x1, S - d1, S - d0]) });
 
-  // Stage 6: corridor with sliding red walls and cyan orbs
-  buildCorridor(s, zMid) {
-    this.floor(s, BRICK);
-    // inner pillars along the walls (the blue panelled corridor look)
-    for (let i = 0; i < 12; i++) {
-      for (const sx of [-1, 1]) {
-        this.add(studBox(4, 30, 8, '#5a7ad6', { unit: 6, cells: 4, style: 'dot' }), sx * (HW - 1), 15, s.startZ - 15 - i * (s.len / 12));
-        this.collision.addBox(sx * (HW - 1), s.startZ - 15 - i * (s.len / 12), 4, 8);
+    // Low dark brown rims (solid) on the closed sides, so you can see where the
+    // path turns next and can't drive off the wrong edge.
+    const RIM_H = 2.4;
+    const RIM_T = 2;
+    for (const [x0, x1, d0, d1, sides] of plats) {
+      for (const side of sides || '') {
+        const alongX = side === 's' || side === 'n';
+        const w = alongX ? x1 - x0 : RIM_T;
+        const d = alongX ? RIM_T : d1 - d0;
+        const x = side === 'w' ? x0 + RIM_T / 2 : side === 'e' ? x1 - RIM_T / 2 : (x0 + x1) / 2;
+        const z = side === 's' ? S - d0 - RIM_T / 2 : side === 'n' ? S - d1 + RIM_T / 2 : S - (d0 + d1) / 2;
+        this.add(studBox(w, RIM_H, d, '#5a3326', { unit: 2.6, cells: 2, style: 'dot', contrast: 0.6 }), x, RIM_H / 2, z);
+        this.collision.addBox(x, z, w, d);
       }
     }
-    const walls = [
-      [60, 0.6, 0],
-      [120, 0.8, 1.2],
-      [180, 0.7, 2.4],
-      [240, 0.95, 0.6],
-      [300, 0.75, 1.8],
-    ];
-    for (const [d, speed, phase] of walls) this.addSlider(s.startZ - d, 30, speed, phase, '#ff1f2a', 20, 28);
-    const orbs = [
-      [90, 1.3, 0],
-      [150, 1.6, 1],
-      [210, 1.4, 2],
-      [270, 1.8, 0.5],
-      [330, 1.5, 1.5],
-    ];
-    const orbMat = new THREE.MeshLambertMaterial({ color: '#7ff0ff', emissive: '#2ad4ff', emissiveIntensity: 0.9, transparent: true, opacity: 0.85 });
-    for (const [d, speed, phase] of orbs) {
-      const mesh = dyn(new THREE.Mesh(new THREE.SphereGeometry(2.6, 20, 14), orbMat));
+
+    // Deep lava under everything
+    this.lavaMat = new THREE.MeshLambertMaterial({ color: '#ff8a3a', emissive: '#ff6a10', emissiveIntensity: 0.55 });
+    const lava = new THREE.Mesh(new THREE.BoxGeometry(W * 2, 1, s.len), this.lavaMat);
+    lava.position.set(0, -DEPTH + 6, zMid);
+    this.root.add(lava);
+
+    // Dark blue crystal shards sticking out of the lava
+    const shardMat = new THREE.MeshLambertMaterial({ color: '#1a3cc8', emissive: '#0a1a6a', emissiveIntensity: 0.4 });
+    const rr = (i) => ((Math.sin(i * 63.1 + 3.7) * 43758.5453) % 1 + 1) % 1;
+    for (let i = 0; i < 110; i++) {
+      const x = (rr(i) - 0.5) * (W - 4) * 2;
+      const d = 44 + rr(i + 100) * (s.len - 100);
+      if (plats.some(([x0, x1, d0, d1]) => x > x0 - 4 && x < x1 + 4 && d > d0 - 4 && d < d1 + 4)) continue;
+      const sh = new THREE.Mesh(new THREE.ConeGeometry(1.6 + rr(i + 9) * 2.4, 5 + rr(i + 3) * 7, 4), shardMat);
+      sh.position.set(x, -DEPTH + 8, S - d);
+      sh.rotation.set(rr(i + 1) - 0.5, rr(i + 2) * 3, rr(i + 4) - 0.5);
+      this.root.add(sh);
+    }
+
+    // Cactus rows on the two end ledges, and a few on the blocks
+    const cactusAt = (x, d, sc = 1.3) => {
+      const c = cactus();
+      c.scale.setScalar(sc);
+      c.rotation.y = rr(x + d) * Math.PI;
+      this.add(c, x, 0, S - d);
+      this.collision.addCircle(x, S - d, 2.4);
+    };
+    for (let x = -hw + 14; x <= hw - 14; x += 26) {
+      if (Math.abs(x) > 24) cactusAt(x, 8, 1.6); // keep the doorways clear
+      if (Math.abs(x + 13) > 24) cactusAt(x + 13, s.len - 8, 1.6);
+    }
+    // Only in the middle of wide dead-end blocks: a cactus beside a rim leaves a gap
+    // narrower than the kart, which wedges it and makes it shake.
+    for (const [x, d] of [[110, 100], [118, 442]]) cactusAt(x, d);
+  }
+
+
+  // Stage 6 (reference recording): a straight brick road from door to door between
+  // tall blue walls. Huge red blocks, the full width of the road, slide forward and
+  // back along it; they can't be jumped and touching one sends you back. Safe bays
+  // are cut into both walls at intervals: wait in a bay while a block passes, then
+  // race it to the next bay. The blocks move as one wave (each a little ahead of
+  // the one before) so they never overlap. Timing (simulated): the starting kart
+  // (~19 units/s) gets about 1.2 s to leave each bay; faster karts get more.
+  buildCorridor(s, zMid) {
+    const S = s.startZ;
+    const RW = CORRIDOR.roadHalf; // road half width; bays run from RW out to s.hw
+    const hw = s.hw;
+    const WALL = '#7d9be6';
+    this.floor(s, BRICK);
+    const bays = CORRIDOR.bays; // bay centres (distance into the stage)
+    const BAY = CORRIDOR.bayLen / 2;
+    // Solid inner walls between the bays (the end of the stage stays open for the pads)
+    const spans = [];
+    let d = 0;
+    for (const b of bays) {
+      spans.push([d, b - BAY]);
+      d = b + BAY;
+    }
+    for (const [d0, d1] of spans) {
+      const len = d1 - d0;
+      const zc = S - (d0 + d1) / 2;
+      for (const sx of [-1, 1]) {
+        const x = sx * (RW + (hw - RW) / 2);
+        this.add(studBox(hw - RW, WALL_H_CORRIDOR, len, WALL, { unit: 6, cells: 4, style: 'dot', cast: false }), x, WALL_H_CORRIDOR / 2, zc);
+        this.collision.addBox(x, zc, hw - RW, len);
+        // light inset panel and dark lines on the road-facing side
+        const fx = sx * (RW - 0.3);
+        this.add(studBox(0.6, 20, len - 6, '#a9bdf0', { unit: 6, cells: 4, style: 'dot', cast: false }), fx, 16, zc);
+        for (const [y, h] of wallLines(WALL_H_CORRIDOR)) if (y > 28) this.add(studBox(0.8, h, len, darker(WALL), { unit: 6, cells: 4, style: 'dot', cast: false }), sx * (RW - 0.4), y, zc);
+      }
+    }
+    // Red blocks: block k sweeps from just behind bay k to just past bay k+1.
+    const mat = plainMaterial('#ff1f2a', { emissive: new THREE.Color('#c00010'), emissiveIntensity: 0.35 });
+    for (let k = 0; k < bays.length - 1; k++) {
+      const mesh = dyn(new THREE.Mesh(new THREE.BoxGeometry(RW * 2 - 1, CORRIDOR.ramH, CORRIDOR.ramHD * 2), mat));
+      mesh.castShadow = true;
+      mesh.position.set(0, CORRIDOR.ramH / 2, S - (bays[k] + bays[k + 1]) / 2);
       this.root.add(mesh);
-      this.orbs.push({ mesh, z: s.startZ - d, amp: 46, speed, phase, y: 5 });
+      this.rams.push({
+        mesh,
+        S,
+        mid: (bays[k] + bays[k + 1]) / 2,
+        amp: (bays[k + 1] - bays[k]) / 2 + CORRIDOR.overshoot,
+        phase: -k * CORRIDOR.waveLead,
+      });
     }
   }
+
+  // z of a red corridor block at time t (seconds)
+  ramZ(r, t) {
+    return r.S - (r.mid + r.amp * Math.sin(t * CORRIDOR.speed + r.phase));
+  }
+
 
   cactusRow(s) {
     const mat = '#2fd84a';
@@ -935,6 +1026,13 @@ export class StageCourse {
       this.add(frame(0.8, openH, COURSE.gateDepth, '#3a62c8'), sx * (half - 0.4), openH / 2, zc);
     }
     this.add(frame(half * 2, topH - openH, COURSE.gateDepth), 0, openH + (topH - openH) / 2, zc);
+    // Darker lines across the gate wall face (around the opening)
+    const gw = (s.hw ?? HW) + 3;
+    const line = (w, h, x, y) => this.add(studBox(w, h, 0.8, darker('#93a9de'), { unit: 6, cells: 4, style: 'dot', cast: false }), x, y, z0 + 0.4);
+    for (const [y, h] of wallLines(topH)) {
+      if (y - h / 2 > openH) line(gw * 2, h, 0, y);
+      else for (const sx of [-1, 1]) line(gw - half - 0.8, h, sx * (half + 0.8 + (gw - half - 0.8) / 2), y);
+    }
     this.add(plainBox(half * 2 - 0.2, 2, 0.4, '#1f8cff', { emissive: new THREE.Color('#1f8cff'), emissiveIntensity: 0.9 }), 0, openH - 1.2, z0 - 0.8);
     this.add(studBox(half * 2, 0.4, COURSE.gateDepth + 2, ROAD, { unit: 6, cells: 4, style: 'dot', cast: false }), 0, -0.1, zc);
     this.add(seeThrough(half * 2, openH - 2.4), 0, (openH - 2.4) / 2, z0 - 1.2);
@@ -1054,7 +1152,7 @@ export class StageCourse {
   buildCoins() {
     for (const def of STAGE_COINS) {
       const mesh = coinMesh();
-      mesh.position.set(def.x, (def.stage === 5 ? 5.4 : 2.6) + this.collision.heightAt(def.x, def.z), def.z);
+      mesh.position.set(def.x, 4.6 + this.collision.heightAt(def.x, def.z), def.z);
       this.root.add(mesh);
       this.coins.push({ def, mesh, hiddenUntil: 0 });
     }
@@ -1066,6 +1164,7 @@ export class StageCourse {
     if (camera) fadeNear(this.fadeLabels, camera.position);
     for (const sp of this.spinners) sp.pivot.rotation.y = t * sp.speed + sp.phase;
     for (const sl of this.sliders) sl.mesh.position.x = Math.sin(t * sl.speed + sl.phase) * sl.amp;
+    for (const r of this.rams) r.mesh.position.z = this.ramZ(r, t);
     for (const sec of this.spikeSections) this.updateSpikeSection(sec, t);
     for (const b of this.beams) {
       const st = this.beamState(b, t);
@@ -1144,6 +1243,10 @@ export class StageCourse {
     for (const sl of this.sliders) {
       const sx = Math.sin(t * sl.speed + sl.phase) * sl.amp;
       if (Math.abs(x - sx) < sl.hw + R * 0.6 && Math.abs(z - sl.z) < sl.hd + R * 0.6) return 'wall';
+    }
+    for (const r of this.rams) {
+      // the bays (|x| beyond the road) are safe; jumping doesn't clear a block
+      if (Math.abs(x) < CORRIDOR.roadHalf + 3 && Math.abs(z - this.ramZ(r, t)) < CORRIDOR.ramHD + R * 0.6) return 'wall';
     }
     for (const o of this.orbs) {
       const ox = Math.sin(t * o.speed + o.phase) * o.amp;
