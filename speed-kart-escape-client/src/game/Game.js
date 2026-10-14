@@ -258,6 +258,8 @@ export class Game {
     s.on('playerAdd', ({ id, p }) => this.addRemote(id, p));
     s.on('playerChange', ({ id, p }) => this.updateRemote(id, p));
     s.on('playerRemove', ({ id }) => this.removeRemote(id));
+    // players whose state arrived before these handlers were bound would be missed
+    s.room?.state?.players?.forEach((p, id) => id !== s.room.sessionId && this.addRemote(id, p));
     s.on('emote', ({ id, emote }) => {
       const r = this.remotes.get(id);
       const clip = this.emoteClips?.get(String(emote));

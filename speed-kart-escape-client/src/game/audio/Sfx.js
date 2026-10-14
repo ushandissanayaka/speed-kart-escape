@@ -111,7 +111,7 @@ class SfxEngine {
 
   // Boxity music_volume (0..1) scales the music bus
   get musicGain() {
-    return 0.55 * (this.musicLevel ?? 1);
+    return 0.75 * (this.musicLevel ?? 1);
   }
 
   setMusicLevel(v) {
@@ -184,10 +184,10 @@ class SfxEngine {
     e.osc.frequency.setTargetAtTime(f, t, 0.06);
     e.harm.frequency.setTargetAtTime(f * 2, t, 0.06);
     e.filter.frequency.setTargetAtTime(f * 3.2, t, 0.08);
-    e.gain.gain.setTargetAtTime(speed01 > 0.02 ? 0.025 + speed01 * 0.02 : 0.01, t, 0.15); // quieter engine
+    e.gain.gain.setTargetAtTime(speed01 > 0.02 ? 0.012 + speed01 * 0.01 : 0.005, t, 0.15); // quiet engine so the music stays on top
     const on = speed01 > 0.05;
     if (on !== e.wasOn && this.musicBus && this.musicOn) {
-      this.musicBus.gain.setTargetAtTime(on ? this.musicGain * 0.73 : this.musicGain, t, 0.4);
+      this.musicBus.gain.setTargetAtTime(on ? this.musicGain * 0.9 : this.musicGain, t, 0.4);
       e.wasOn = on;
     }
   }
