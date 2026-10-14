@@ -272,7 +272,7 @@ export class Game {
     const racer = new Racer(this.scene, { name: p.name, showName: true, kart: p.kart, trail: p.trail });
     racer.root.position.set(p.x, 0, p.z);
     racer.root.rotation.y = p.ry;
-    const r = { racer, x: p.x, z: p.z, ry: p.ry, v: p.v, avatarJson: '', legionId: p.legionId || '' };
+    const r = { racer, x: p.x, z: p.z, ry: p.ry, v: p.v, avatarJson: '', legionId: p.legionId || '', name: p.name || '' };
     this.remotes.set(id, r);
     this.updateRemote(id, p);
   }
@@ -285,6 +285,7 @@ export class Game {
     r.ry = p.ry;
     r.v = p.v;
     r.legionId = p.legionId || '';
+    r.name = p.name || r.name;
     r.racer.setKart(p.kart);
     r.racer.setTrail(p.trail);
     if (p.avatar && p.avatar !== r.avatarJson) {
@@ -341,6 +342,16 @@ export class Game {
 
   login() {
     legion.showAuthPopup();
+  }
+
+  // For the invite popup
+  currentRoomId() {
+    return this.session?.room?.roomId || '';
+  }
+
+  // Logged-in players in our room (not us), for "Add Friend"
+  roomPlayers() {
+    return [...this.remotes.values()].filter((r) => r.legionId).map((r) => ({ legionId: r.legionId, name: r.name || 'Player' }));
   }
 
   // Small portrait of the player's own character (the default Boxity character when

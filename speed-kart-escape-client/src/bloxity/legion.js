@@ -87,12 +87,45 @@ export async function authenticateWithServer(url) {
 
 // --- avatar ----------------------------------------------------------------
 
+// getEquipped() can leave out some slots (hair in particular), so also read each slot
+// through its own getter (getHairId, getHatId, ...) and merge them in.
+const SLOT_GETTERS = {
+  hatId: 'getHatId',
+  hairId: 'getHairId',
+  backId: 'getBackId',
+  skinId: 'getSkinId',
+  headId: 'getHeadId',
+  torsoId: 'getTorsoId',
+  armLId: 'getArmLId',
+  armRId: 'getArmRId',
+  legLId: 'getLegLId',
+  legRId: 'getLegRId',
+};
+// (hand, shoes, mask, neck, chest, waist, face, shirt, pants come from getEquipped())
+function equippedWithSlots(avatar) {
+  let eq = {};
+  try {
+    eq = { ...(avatar.getEquipped?.() || {}) };
+  } catch {
+    /* ignore */
+  }
+  for (const [key, getter] of Object.entries(SLOT_GETTERS)) {
+    try {
+      const v = avatar[getter]?.();
+      if (v != null && v !== '' && v !== '-1' && v !== 'undefined') eq[key] = String(v);
+    } catch {
+      /* ignore */
+    }
+  }
+  return eq;
+}
+
 export function getAvatarData() {
   const s = sdk();
   const user = getUser();
   if (s?.avatar && user) {
     return {
-      equipped: s.avatar.getEquipped?.() || {},
+      equipped: equippedWithSlots(s.avatar),
       proportions: s.avatar.getProportions?.() || {},
       skinUrl: s.avatar.getSkinTextureUrl?.() || null,
       pfp: user.pfp || null,
@@ -249,9 +282,21 @@ export async function getFriends() {
   }
 }
 
-export function inviteLink() {
+// Friend request to another Bloxity player: { success, status?: 'accepted'|'pending', error? }
+export async function sendFriendRequest(userId) {
+  const s = sdk();
+  if (!s?.social?.sendFriendRequest || !userId) return { success: false, error: 'Not available' };
   try {
-    const l = sdk()?.social?.getInviteFriendsLink?.();
+    return (await s.social.sendFriendRequest(userId)) || { success: false };
+  } catch (err) {
+    return { success: false, error: err?.message || 'Failed' };
+  }
+}
+
+// Shareable link into our current room
+export function inviteLink(roomId) {
+  try {
+    const l = sdk()?.social?.getInviteFriendsLink?.(roomId ? { roomId } : undefined);
     if (typeof l === 'string' && l) return l;
   } catch {
     /* ignore */

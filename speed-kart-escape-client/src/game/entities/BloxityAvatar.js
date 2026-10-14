@@ -4,7 +4,7 @@
 // player.glb facts: 6.4 units tall, faces +Z, hips at y = 2.4, 22-bone rig rooted at Rig1.
 
 import * as THREE from 'three';
-import { SLOT_ATTACH, isReal, loadAccessory, loadBaseBody, loadPixelTexture, skinTextureUrl } from '../../bloxity/avatarAssets.js';
+import { PART_SLOTS, SLOT_ATTACH, isReal, loadAccessory, loadBaseBody, loadPart, loadPixelTexture, skinTextureUrl } from '../../bloxity/avatarAssets.js';
 
 const HIP_Y = 2.4;
 
@@ -15,6 +15,7 @@ export class BloxityAvatar {
     this.body = null;
     this.bones = {};
     this.accessories = [];
+    this.pairs = []; // hand / shoes items that follow a leaf bone (position + rotation)
     this.restInverse = new Map();
     this.token = 0;
     this.steer = 0;
@@ -51,10 +52,42 @@ export class BloxityAvatar {
     // Hips sit on the kart seat: shift the model so y = 0 is the hip line.
     body.position.y = -HIP_Y;
     this.root.add(body);
+    // Rest transforms are captured right after player.glb loads, before any pose or proportions
     this.captureRest();
     this.applyProportions(avatar.proportions || {});
     this.poseSeated();
+    // Body parts first: arms/legs/torso without their own texture use the skin material
+    await this.applyParts(avatar.equipped || {}, token);
+    if (token !== this.token) return;
     await Promise.all([this.applySkin(avatar, token), this.applyAccessories(avatar.equipped || {}, token)]);
+  }
+
+  // Custom head / torso / arms / legs: rebind each part's skinned mesh to our skeleton
+  // (same bone names as player.glb) and hide the default mesh it replaces.
+  async applyParts(equipped, token) {
+    const jobs = PART_SLOTS.filter((p) => isReal(equipped[p.key])).map(async (slot) => {
+      try {
+        const part = await loadPart(slot.url(equipped[slot.key]));
+        if (token !== this.token || !part) return;
+        const target = this.body.getObjectByName(slot.replace);
+        if (!target) return;
+        const bones = part.skeleton.bones.map((b) => this.bones[b.name]);
+        if (bones.some((b) => !b)) return; // not our rig
+        const ownTexture = !!part.material?.map;
+        const material = ownTexture ? part.material.clone() : target.material;
+        const mesh = new THREE.SkinnedMesh(part.geometry, material);
+        mesh.name = `part_${slot.key}`;
+        mesh.userData.ownTexture = ownTexture;
+        mesh.castShadow = true;
+        mesh.frustumCulled = false;
+        target.parent.add(mesh);
+        mesh.bind(new THREE.Skeleton(bones, part.skeleton.boneInverses), part.bindMatrix);
+        target.visible = false;
+      } catch (err) {
+        console.warn('[avatar] body part failed', slot.key, err);
+      }
+    });
+    await Promise.all(jobs);
   }
 
   captureRest() {
@@ -77,7 +110,7 @@ export class BloxityAvatar {
       const tex = await loadPixelTexture(url);
       if (token !== this.token) return;
       this.body.traverse((o) => {
-        if (o.isMesh && o.material?.map) {
+        if (o.isMesh && o.material?.map && !o.userData.ownTexture) {
           o.material.map = tex;
           o.material.needsUpdate = true;
         }
@@ -90,10 +123,38 @@ export class BloxityAvatar {
   async applyAccessories(equipped, token) {
     for (const a of this.accessories) a.parent?.remove(a);
     this.accessories = [];
+    this.pairs = [];
     const jobs = SLOT_ATTACH.filter((s) => isReal(equipped[s.key])).map(async (slot) => {
       try {
         const mesh = await loadAccessory(slot.folder, equipped[slot.key]);
         if (token !== this.token) return;
+        if (slot.pair) {
+          // Left: restInverse(leaf) * translate(origin 0). Right: a copy mirrored across
+          // x, restInverse(leaf) * scale(-1, 1, 1). Both follow the bone's world position
+          // and rotation (not its scale) every frame, see updatePairs().
+          const [boneL, boneR] = slot.pair;
+          if (!this.bones[boneL] || !this.bones[boneR]) return;
+          const mirror = mesh.clone(true);
+          mirror.traverse((o) => {
+            if (o.isMesh) {
+              o.material = o.material.clone();
+              o.material.side = THREE.DoubleSide; // mirroring flips the faces
+            }
+          });
+          const left = this.restInverse.get(boneL).clone();
+          const right = this.restInverse.get(boneR).clone().multiply(new THREE.Matrix4().makeScale(-1, 1, 1));
+          for (const [m, bone, local, side] of [
+            [mesh, boneL, left, 1],
+            [mirror, boneR, right, -1],
+          ]) {
+            m.matrixAutoUpdate = false;
+            this.root.add(m);
+            this.accessories.push(m);
+            this.pairs.push({ mesh: m, bone: this.bones[bone], local, side });
+          }
+          this.updatePairs();
+          return;
+        }
         const bone = this.bones[slot.bone];
         if (!bone) return;
         if (slot.origin) {
@@ -113,13 +174,45 @@ export class BloxityAvatar {
     await Promise.all(jobs);
   }
 
+  // Boxity proportions, applied by moving / scaling bones so every attached item follows.
   applyProportions(p) {
-    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, Number.isFinite(v) ? v : 1));
+    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, Number.isFinite(Number(v)) ? Number(v) : 1));
     const height = clamp(p.height, 0.5, 1.6);
     const head = clamp(p.headScale, 0.3, 2.6);
+    const shoulder = clamp(p.shoulderWidth, 0.5, 1.5);
+    const arm = clamp(p.armLength, 0.05, 3);
+    const legX = clamp(p.legOffsetX, -0.7, 5);
+    const torsoX = clamp(p.torsoScaleX, 0.3, 2);
+    const neck = clamp(p.neckHeight, 0.94, 1.2);
+    const b = this.bones;
     this.body.scale.setScalar(height);
     this.body.position.y = -HIP_Y * height;
-    if (this.bones.Neck1) this.bones.Neck1.scale.setScalar(head);
+    if (b.Neck1) b.Neck1.scale.setScalar(head);
+    // torso width; its children keep their own width
+    if (b.Spine2) b.Spine2.scale.x = torsoX;
+    for (const n of ['ArmL_Offset', 'ArmR_Offset', 'Neck_Offset']) if (b[n]) b[n].scale.x = 1 / torsoX;
+    // shoulders (base x = +-2.0), arm length (bones point along +y), legs (base x = +-0.6), neck
+    if (b.ArmL_Offset) b.ArmL_Offset.position.x = 2.0 * shoulder;
+    if (b.ArmR_Offset) b.ArmR_Offset.position.x = -2.0 * shoulder;
+    for (const n of ['ArmL1', 'ArmR1']) if (b[n]) b[n].scale.y = arm;
+    if (b.LegL_Offset) b.LegL_Offset.position.x = 0.6 * legX;
+    if (b.LegR_Offset) b.LegR_Offset.position.x = -0.6 * legX;
+    if (b.Neck_Offset) b.Neck_Offset.position.y = 0.6 * neck;
+  }
+
+  // Hand / shoes pair items: compose(bone world position, bone world rotation, scale) *
+  // local, expressed in our root's space (scale = the avatar's own world scale so the
+  // items match the character size in the kart).
+  updatePairs() {
+    if (!this.pairs.length) return;
+    this.root.updateWorldMatrix(true, true);
+    _rootInv.copy(this.root.matrixWorld).invert();
+    this.root.matrixWorld.decompose(_p, _rq, _rs);
+    for (const pr of this.pairs) {
+      pr.bone.matrixWorld.decompose(_p, _rq, _bs);
+      _m.compose(_p, _rq, _rs).multiply(pr.local);
+      pr.mesh.matrix.multiplyMatrices(_rootInv, _m);
+    }
   }
 
   poseSeated() {
@@ -146,6 +239,7 @@ export class BloxityAvatar {
     if (b.Neck_Offset) b.Neck_Offset.rotation.z = -this.steer * 0.12;
     if (b.Spine1) b.Spine1.rotation.x = -0.08 * speed01 + Math.sin(this.t * 9) * 0.01 * speed01;
     this.applyEmote(dt);
+    this.updatePairs();
   }
 
   // --- Boxity emotes --------------------------------------------------------
@@ -207,6 +301,12 @@ export class BloxityAvatar {
 }
 
 const DEG = Math.PI / 180;
+const _rootInv = new THREE.Matrix4();
+const _m = new THREE.Matrix4();
+const _p = new THREE.Vector3();
+const _rq = new THREE.Quaternion();
+const _rs = new THREE.Vector3();
+const _bs = new THREE.Vector3();
 const _euler = new THREE.Euler();
 const _q = new THREE.Quaternion();
 const _target = new THREE.Quaternion();
