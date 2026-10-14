@@ -197,6 +197,7 @@ export function Hud({ game, profile, online, serverOffset, openPanel }) {
           <span className="pct o">+{Math.round((rebirthMultiplier(profile.rebirths) - 1) * 100)}%</span>
         </div>
         <button className="mini wide press" title="Invite friends" onClick={() => legion.inviteFriends() || openPanel('invite')}>
+          <span className="mini-tag o">Invite</span>
           <FriendsIcon />
           <span className="pct o">+0%</span>
         </button>

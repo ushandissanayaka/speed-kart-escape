@@ -82,7 +82,32 @@ export async function loadAccessory(folder, id) {
   return clone;
 }
 
+// Custom body parts (head / torso / arms / legs): skinned meshes on the same rig as
+// player.glb. Each replaces one of the default body meshes.
+export const PART_SLOTS = [
+  { key: 'headId', replace: 'default_head', url: (id) => `${CDN}/parts/head/${id}.glb` },
+  { key: 'torsoId', replace: 'default_torso', url: (id) => `${CDN}/parts/torso/${id}.glb` },
+  { key: 'armLId', replace: 'default_arm_L', url: (id) => `${CDN}/parts/arms/${id}_L.glb` },
+  { key: 'armRId', replace: 'default_arm_R', url: (id) => `${CDN}/parts/arms/${id}_R.glb` },
+  { key: 'legLId', replace: 'default_leg_L', url: (id) => `${CDN}/parts/legs/${id}_L.glb` },
+  { key: 'legRId', replace: 'default_leg_R', url: (id) => `${CDN}/parts/legs/${id}_R.glb` },
+];
+
+const partCache = new Map();
+// Returns the part's SkinnedMesh (a fresh clone each call).
+export async function loadPart(url) {
+  if (!partCache.has(url)) partCache.set(url, gltfLoader.loadAsync(url).then((g) => g.scene));
+  const scene = SkeletonUtils.clone(await partCache.get(url));
+  let mesh = null;
+  scene.traverse((o) => {
+    if (!mesh && o.isSkinnedMesh) mesh = o;
+  });
+  return mesh;
+}
+
 // Attachments described in the docs. Hat, hair and mask share the hats folder and Neck1.
+// Hand and shoes are worn as a pair: the mesh on the left leaf bone plus a copy
+// mirrored across x on the right one.
 export const SLOT_ATTACH = [
   { key: 'hatId', folder: 'hats', bone: 'Neck1', local: [0, 0.8, 0] },
   { key: 'hairId', folder: 'hats', bone: 'Neck1', local: [0, 0.8, 0] },
@@ -91,4 +116,6 @@ export const SLOT_ATTACH = [
   { key: 'neckId', folder: 'neck', bone: 'Spine2', origin: [0, 4.8, 0] },
   { key: 'chestId', folder: 'chest', bone: 'Spine2', origin: [0, 3.6, 0] },
   { key: 'waistId', folder: 'waist', bone: 'Spine1', origin: [0, 2.4, 0] },
+  { key: 'handId', folder: 'hand', pair: ['ArmL2_leaf', 'ArmR2_leaf'] },
+  { key: 'shoesId', folder: 'shoes', pair: ['LegL2_leaf', 'LegR2_leaf'] },
 ];

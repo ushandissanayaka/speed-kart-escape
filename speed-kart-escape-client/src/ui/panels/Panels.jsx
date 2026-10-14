@@ -487,20 +487,135 @@ function CurrencyPanel({ game, onClose }) {
   );
 }
 
-// --- Invite friends -----------------------------------------------------------------
-function InvitePanel({ onClose }) {
+// --- Invite friends (Bloxity) ------------------------------------------------------
+// Your Bloxity friends with their status and an Invite button (Bloxity sends them an
+// invite into this room), "Add Friend" for logged-in players in the room, and the
+// share link.
+const DEFAULT_PFP = 'https://static.bloxity.io/img/pfps/s0.png?width=128&quality=85&v=2';
+const PRESENCE = {
+  'in-game': ['#3dff6a', 'In game'],
+  online: ['#3dc8ff', 'Online'],
+  away: ['#ffc23d', 'Away'],
+  offline: ['#9aa0b8', 'Offline'],
+};
+const PRESENCE_ORDER = { 'in-game': 0, online: 1, away: 2, offline: 3 };
+
+function InvitePanel({ game, identity, onClose }) {
+  const loggedIn = !!identity && !identity.isGuest;
+  const [friends, setFriends] = useState(null);
+  const [sent, setSent] = useState({}); // friend id -> 'sending' | 'sent' | 'failed'
+  const [requests, setRequests] = useState({}); // player id -> 'sending' | 'pending' | 'accepted' | 'failed'
   const [copied, setCopied] = useState(false);
-  const link = legion.inviteLink();
+  const roomId = game.currentRoomId();
+  const link = legion.inviteLink(roomId);
+
+  useEffect(() => {
+    if (!loggedIn) return undefined;
+    let alive = true;
+    const load = () => legion.getFriends().then((list) => alive && setFriends(Array.isArray(list) ? list : []));
+    load();
+    const timer = setInterval(load, 15000); // keep online status fresh
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [loggedIn]);
+
+  const invite = async (f) => {
+    setSent((m) => ({ ...m, [f._id]: 'sending' }));
+    const ok = await legion.inviteFriend(f._id, roomId);
+    setSent((m) => ({ ...m, [f._id]: ok ? 'sent' : 'failed' }));
+    if (!ok) setTimeout(() => setSent((m) => ({ ...m, [f._id]: undefined })), 2500);
+  };
+  const addFriend = async (p) => {
+    setRequests((m) => ({ ...m, [p.legionId]: 'sending' }));
+    const res = await legion.sendFriendRequest(p.legionId);
+    setRequests((m) => ({ ...m, [p.legionId]: res?.success ? res.status || 'pending' : 'failed' }));
+  };
+
+  const sorted = (friends || []).slice().sort((a, b) => (PRESENCE_ORDER[a.presence?.status] ?? 3) - (PRESENCE_ORDER[b.presence?.status] ?? 3));
+  const friendIds = new Set(sorted.map((f) => String(f._id)));
+  const strangers = loggedIn ? game.roomPlayers().filter((p) => !friendIds.has(String(p.legionId))) : [];
+  const statusText = (f) => {
+    const st = f.presence?.status || 'offline';
+    if (f.presence?.gameSlug === legion.SLUG) return 'Playing Speed Kart Escape';
+    if (st === 'in-game' && f.presence?.gameName) return `Playing ${f.presence.gameName}`;
+    return (PRESENCE[st] || PRESENCE.offline)[1];
+  };
+
   return (
     <Modal theme="worlds" icon={<FriendsIcon />} title="Invite Friends" onClose={onClose}>
       <div className="invite">
-        <div className="o">Play together! Friends who join get you a boost.</div>
+        {!loggedIn ? (
+          <div className="inv-login">
+            <div className="o">Log in to invite your Bloxity friends.</div>
+            <Btn color="blue" onClick={() => game.login()}>
+              Log in
+            </Btn>
+          </div>
+        ) : (
+          <>
+            <div className="inv-title o">Your friends</div>
+            <div className="inv-list">
+              {friends === null && <div className="inv-empty o">Loading friends…</div>}
+              {friends && !sorted.length && <div className="inv-empty o">No friends yet. Share the link below!</div>}
+              {sorted.map((f) => {
+                const color = (PRESENCE[f.presence?.status] || PRESENCE.offline)[0];
+                const state = sent[f._id];
+                return (
+                  <div className="inv-row" key={f._id}>
+                    <img className="inv-pfp" src={f.pfp || DEFAULT_PFP} alt="" draggable="false" onError={(e) => (e.currentTarget.src = DEFAULT_PFP)} />
+                    <div className="inv-who">
+                      <div className="inv-name o">{f.displayName || f.username}</div>
+                      <div className="inv-status" style={{ color }}>
+                        <i style={{ background: color }} />
+                        {statusText(f)}
+                      </div>
+                    </div>
+                    <Btn color={state === 'sent' ? 'green' : state === 'failed' ? 'red' : 'blue'} disabled={!!state} onClick={() => invite(f)}>
+                      {state === 'sending' ? '…' : state === 'sent' ? 'Sent ✓' : state === 'failed' ? 'Failed' : 'Invite'}
+                    </Btn>
+                  </div>
+                );
+              })}
+            </div>
+            {strangers.length > 0 && (
+              <>
+                <div className="inv-title o">Players here</div>
+                <div className="inv-list">
+                  {strangers.map((p) => {
+                    const st = requests[p.legionId];
+                    return (
+                      <div className="inv-row" key={p.legionId}>
+                        <img className="inv-pfp" src={DEFAULT_PFP} alt="" draggable="false" />
+                        <div className="inv-who">
+                          <div className="inv-name o">{p.name}</div>
+                          <div className="inv-status" style={{ color: '#3dff6a' }}>
+                            <i style={{ background: '#3dff6a' }} />
+                            In this server
+                          </div>
+                        </div>
+                        <Btn color={st === 'accepted' || st === 'pending' ? 'green' : 'purple'} disabled={!!st && st !== 'failed'} onClick={() => addFriend(p)}>
+                          {st === 'sending' ? '…' : st === 'accepted' ? 'Friends ✓' : st === 'pending' ? 'Requested' : st === 'failed' ? 'Retry' : 'Add Friend'}
+                        </Btn>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </>
+        )}
+        <div className="inv-title o">Invite link</div>
         <div className="invite-row">
           <input readOnly value={link} onFocus={(e) => e.target.select()} />
           <Btn
             color="blue"
             onClick={() => {
-              navigator.clipboard?.writeText(link).then(() => setCopied(true));
+              navigator.clipboard?.writeText(link).then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              });
             }}
           >
             {copied ? 'Copied!' : 'Copy Link'}

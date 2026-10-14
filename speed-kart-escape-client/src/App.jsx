@@ -7,8 +7,13 @@ import { AwayPopup } from './ui/AwayPopup.jsx';
 import { newProfile } from './shared/gameData.js';
 
 // HUD scale: the reference was captured at 1918x1004.
+// HUD scale (--s): the HUD is laid out at 1918x1004. Landscape fits that box; portrait
+// phones get a narrower reference so buttons stay big enough to tap.
 function computeScale() {
-  return Math.max(0.42, Math.min(1.5, Math.min(window.innerHeight / 1004, window.innerWidth / 1500)));
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const s = h > w ? Math.min(w / 900, h / 1700) : Math.min(h / 1004, w / 1500);
+  return Math.max(0.3, Math.min(1.5, s));
 }
 
 const isTouch = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
