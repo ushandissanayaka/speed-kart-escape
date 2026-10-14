@@ -133,9 +133,24 @@ export class Game {
     this.onVisibility = () => (document.hidden ? legion.gameplayEnd() : legion.gameplayStart());
     document.addEventListener('visibilitychange', this.onVisibility);
 
-    // Warm up: render once so shaders compile before the loading screen drops.
+    // Warm up behind the loading screen: compile every shader and upload every
+    // texture now, including things that are hidden or off-screen (later stages,
+    // signs, confetti, effects). Otherwise the browser prepares them the first time
+    // they appear, which froze the game for a moment (e.g. on entering Stage 1).
+    const restore = [];
+    this.scene.traverse((o) => {
+      if (!o.visible) {
+        restore.push([o, 'visible', false]);
+        o.visible = true;
+      }
+      if (o.frustumCulled) {
+        restore.push([o, 'frustumCulled', true]);
+        o.frustumCulled = false;
+      }
+    });
     renderer.compile(this.scene, this.camera);
     renderer.render(this.scene, this.camera);
+    for (const [o, key, value] of restore) o[key] = value;
     legion.loadingEnd();
     legion.gameplayStart();
     this.running = true;
@@ -444,6 +459,22 @@ export class Game {
     this.merchantHere = m.present;
   }
 
+  // Ground slope under a kart at (x, z) facing ry: pitch along the heading, roll
+  // across it. Sudden steps (road edges, cliffs) are ignored, only real slopes count.
+  groundTilt(x, z, ry) {
+    const col = this.world.collision;
+    const L = 3.5;
+    const W = 2.6;
+    const hx = Math.sin(ry);
+    const hz = Math.cos(ry);
+    const df = col.heightAt(x + hx * L, z + hz * L) - col.heightAt(x - hx * L, z - hz * L);
+    const ds = col.heightAt(x + hz * W, z - hx * W) - col.heightAt(x - hz * W, z + hx * W);
+    const lim = 0.55; // ~31 degrees
+    const pitch = Math.abs(df) > 2 * L * 0.9 ? 0 : Math.max(-lim, Math.min(lim, Math.atan2(df, 2 * L)));
+    const roll = Math.abs(ds) > 2 * W * 0.9 ? 0 : Math.max(-lim, Math.min(lim, Math.atan2(ds, 2 * W)));
+    return { pitch, roll };
+  }
+
   // --- loop ----------------------------------------------------------------
 
   frame() {
@@ -462,8 +493,23 @@ export class Game {
       } else this.fall = null;
     }
     this.player.root.position.set(c.x, c.y + c.jumpY - (this.fall?.y || 0), c.z);
-    this.player.root.rotation.y = c.ry;
+    // Lean the kart with the ground: nose up/down along hills, tilt across side slopes
+    const tilt = this.groundTilt(c.x, c.z, c.ry);
+    const tk = Math.min(1, dt * 10);
+    this.tiltP = (this.tiltP || 0) + (tilt.pitch - (this.tiltP || 0)) * tk;
+    this.tiltR = (this.tiltR || 0) + (tilt.roll - (this.tiltR || 0)) * tk;
+    this.player.root.rotation.set(-this.tiltP, c.ry, this.tiltR, 'YXZ');
     this.player.root.updateMatrixWorld();
+    // The sun's shadow area follows the player, so shadows show in every stage
+    // (same shadow map size; snapped to half units so the shadows don't shimmer).
+    const sun = this.world.sun;
+    if (sun) {
+      const sx = Math.round(c.x * 2) / 2;
+      const sz = Math.round(c.z * 2) / 2;
+      sun.target.position.set(sx, c.y, sz - 30);
+      sun.position.set(sx - 120, c.y + 260, sz + 140); // same angle as before
+      sun.target.updateMatrixWorld();
+    }
     this.player.animate(dt, c.v, c.steer, c.accel, c.topSpeed, c.jumpY > 0.4);
 
     for (const r of this.remotes.values()) {
@@ -477,6 +523,10 @@ export class Game {
       let d = r.ry - root.rotation.y;
       d = Math.atan2(Math.sin(d), Math.cos(d));
       root.rotation.y += d * k;
+      const rt = this.groundTilt(root.position.x, root.position.z, root.rotation.y);
+      root.rotation.order = 'YXZ';
+      root.rotation.x += (-rt.pitch - root.rotation.x) * k;
+      root.rotation.z += (rt.roll - root.rotation.z) * k;
       root.updateMatrixWorld();
       const moved = Math.hypot(root.position.x - prevX, root.position.z - prevZ) / Math.max(dt, 1e-3);
       r.racer.animate(dt, Math.sign(r.v || 1) * moved, Math.max(-1, Math.min(1, d * 3)), 0, 60);
@@ -509,6 +559,12 @@ export class Game {
     });
     // Merchant pad — opens the potion shop
     this.enterZone('merchant', inCircle(WORLD.merchantPad), () => this.events.emit('openPanel', 'merchant'));
+    // Gold shop pad — opens the Coins & Wins packs
+    const yp = WORLD.yellowPad;
+    this.enterZone('shopPad', Math.abs(x - yp.x) < yp.w / 2 + 1 && Math.abs(z - yp.z) < yp.d / 2 + 1, () => {
+      sfx.reward();
+      this.events.emit('openPanel', 'currency');
+    });
     // World 2 arch
     this.enterZone('world2', inCircle(WORLD.world2Gate, 2), () => {
       const msg =

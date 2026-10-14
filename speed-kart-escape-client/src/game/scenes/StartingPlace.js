@@ -51,9 +51,23 @@ export class StartingPlace {
     scene.add(this.merchant.root);
     this.collision.addBox(WORLD.merchantPad.x, -67, 42, 20);
 
-    const yellow = studBox(WORLD.yellowPad.w, 0.3, WORLD.yellowPad.d, '#fae46b', { unit: 2.6, cells: 1, cast: false });
-    yellow.position.set(WORLD.yellowPad.x, 0.15, WORLD.yellowPad.z);
-    scene.add(yellow);
+    // Gold shop pad in front of the "Purchase Wins And Coins!" board: stepped 3D
+    // gold layers with a glowing top. Driving onto it opens the Coins & Wins packs.
+    const yp = WORLD.yellowPad;
+    const goldStep = (w, h, d, color, y, glow = 0) => {
+      const m = studBox(w, h, d, color, { unit: 2.6, cells: 2, style: 'dot', cast: false, emissive: glow ? 0xffb000 : 0x000000, emissiveIntensity: glow });
+      m.position.set(yp.x, y, yp.z);
+      scene.add(m);
+    };
+    goldStep(yp.w + 4, 0.6, yp.d + 4, '#8a5a08', 0.3); // dark gold base
+    goldStep(yp.w + 2, 0.6, yp.d + 2, '#d9960f', 0.9); // middle step
+    goldStep(yp.w, 0.6, yp.d, '#ffd23a', 1.5, 0.35); // glowing gold top
+    for (const sx of [-1, 1]) {
+      // raised gold rails along the long edges
+      goldStep(1, 0.5, yp.d, '#ffe27a', 1.95);
+      scene.children[scene.children.length - 1].position.x = yp.x + sx * (yp.w / 2 - 0.5);
+    }
+    this.collision.addHeight(yp.x - yp.w / 2 - 2, yp.x + yp.w / 2 + 2, yp.z - yp.d / 2 - 2, yp.z + yp.d / 2 + 2, 1.8);
 
     const wg = WORLD.world2Gate;
     this.worldGate = new WorldGate(wg.x, wg.z, -0.3);
