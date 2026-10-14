@@ -238,6 +238,29 @@ class SfxEngine {
     this.duck(1.8);
   }
 
+  // Final stage win: a big brass-like fanfare with drum hits, a held major chord and
+  // a shower of sparkles.
+  victory() {
+    if (!this.ensure()) return;
+    const t = this.ctx.currentTime;
+    // drum roll into the fanfare
+    for (let i = 0; i < 8; i++) this.tone(110, t + i * 0.06, 0.08, { type: 'triangle', vol: 0.12 + i * 0.015, slide: 0.7 });
+    // ta-ta-ta-taaa
+    const lead = [[523, 0.5, 0.14], [523, 0.66, 0.14], [523, 0.82, 0.14], [698, 0.98, 0.5], [784, 1.5, 0.18], [880, 1.7, 0.18], [1047, 1.9, 1.4]];
+    for (const [f, at, d] of lead) {
+      this.tone(f, t + at, d, { type: 'sawtooth', vol: 0.07, attack: 0.02 });
+      this.tone(f, t + at, d, { type: 'triangle', vol: 0.14, attack: 0.01 });
+      this.tone(f / 2, t + at, d, { type: 'triangle', vol: 0.08, attack: 0.01 });
+    }
+    // big held chord
+    for (const f of [523, 659, 784, 1047, 1319]) this.tone(f, t + 1.9, 1.8, { type: 'triangle', vol: 0.07, attack: 0.03 });
+    // crash hits
+    for (const at of [0.98, 1.9]) this.tone(60, t + at, 0.4, { type: 'triangle', vol: 0.3, slide: 0.5 });
+    // sparkles
+    for (let i = 0; i < 14; i++) this.tone(2200 + ((i * 397) % 1600), t + 2.0 + i * 0.09, 0.14, { vol: 0.045 });
+    this.duck(3.8);
+  }
+
   levelUp() {
     if (!this.ensure()) return;
     const t = this.ctx.currentTime;

@@ -9,6 +9,14 @@ import * as THREE from 'three';
 const flameOuter = new THREE.MeshBasicMaterial({ color: '#ff6a00', transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
 const flameInner = new THREE.MeshBasicMaterial({ color: '#fff27a', transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
 const sparkMat = new THREE.MeshBasicMaterial({ color: '#ffb02e', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+
+// Flame look per kart: colours and how far the flame shoots out at full speed.
+// Junior Kart: red fire that reaches further; Pro Kart: blue fire that reaches further.
+export const FLAME_STYLES = {
+  default: { outer: '#ff6a00', inner: '#fff27a', spark: '#ffb02e', reach: 1 },
+  junior: { outer: '#ff0a0a', inner: '#ff5a2a', spark: '#ff2a1a', reach: 1.8 },
+  pro: { outer: '#1a6bff', inner: '#9fe4ff', spark: '#3ab8ff', reach: 1.8 },
+};
 const pipeMat = new THREE.MeshLambertMaterial({ color: '#3a3f55', emissive: '#111320', emissiveIntensity: 0.3 });
 
 const SPARKS = 24;
@@ -19,6 +27,11 @@ export class ExhaustFire {
     this.root = new THREE.Group();
     this.root.userData.dynamic = true;
     parent.add(this.root);
+    // own materials so each kart can have its own flame colour
+    this.outerMat = flameOuter.clone();
+    this.innerMat = flameInner.clone();
+    this.sparkMat = sparkMat.clone();
+    this.reach = 1;
     this.flames = [];
     for (const x of [-2.2, 2.2]) {
       const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.65, 2.2, 12), pipeMat);
@@ -26,8 +39,8 @@ export class ExhaustFire {
       pipe.position.set(x, 2.3, -7.6);
       this.root.add(pipe);
       // cones point backward (-Z): geometry tip is +Y, rotate so +Y -> -Z
-      const outer = new THREE.Mesh(new THREE.ConeGeometry(0.75, 1, 12, 1, true), flameOuter);
-      const inner = new THREE.Mesh(new THREE.ConeGeometry(0.42, 1, 10, 1, true), flameInner);
+      const outer = new THREE.Mesh(new THREE.ConeGeometry(0.75, 1, 12, 1, true), this.outerMat);
+      const inner = new THREE.Mesh(new THREE.ConeGeometry(0.42, 1, 10, 1, true), this.innerMat);
       for (const c of [outer, inner]) {
         c.geometry.translate(0, 0.5, 0);
         c.rotation.x = -Math.PI / 2;
@@ -38,7 +51,7 @@ export class ExhaustFire {
       this.flames.push({ outer, inner });
     }
     // sparks (world-space so they trail behind)
-    this.sparks = new THREE.InstancedMesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), sparkMat, SPARKS);
+    this.sparks = new THREE.InstancedMesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), this.sparkMat, SPARKS);
     this.sparks.frustumCulled = false;
     this.sparkData = Array.from({ length: SPARKS }, () => ({ life: 0, p: new THREE.Vector3(), v: new THREE.Vector3() }));
     this.next = 0;
@@ -46,6 +59,14 @@ export class ExhaustFire {
     this.dummy = new THREE.Object3D();
     this.tmp = new THREE.Vector3();
     this.t = 0;
+  }
+
+  setStyle(kartId) {
+    const st = FLAME_STYLES[kartId] || FLAME_STYLES.default;
+    this.outerMat.color.set(st.outer);
+    this.innerMat.color.set(st.inner);
+    this.sparkMat.color.set(st.spark);
+    this.reach = st.reach;
   }
 
   attachSparks(scene) {
@@ -57,8 +78,9 @@ export class ExhaustFire {
     const on = speed01 > 0.08;
     for (const [i, f] of this.flames.entries()) {
       const flick = 0.75 + Math.sin(this.t * 38 + i * 2) * 0.15 + Math.random() * 0.2;
-      const len = on ? (1.2 + speed01 * 4.5) * flick : 0.001;
-      f.outer.scale.set(1 + speed01 * 0.4, len, 1 + speed01 * 0.4);
+      const len = on ? (1.2 + speed01 * 4.5 * this.reach) * flick : 0.001;
+      const w = 1 + speed01 * 0.4 * this.reach;
+      f.outer.scale.set(w, len, w);
       f.inner.scale.set(1, len * 0.65, 1);
       f.outer.visible = f.inner.visible = on;
     }

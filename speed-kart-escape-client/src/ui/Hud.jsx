@@ -256,7 +256,7 @@ export function Popups({ game }) {
       game.events.on('win', (w) => {
         const id = ++idRef.current;
         setWin({ ...w, id });
-        setTimeout(() => setWin((cur) => (cur?.id === id ? null : cur)), 2600);
+        setTimeout(() => setWin((cur) => (cur?.id === id ? null : cur)), w.final ? 5200 : 2600);
       }),
       game.events.on('death', (d) => setDeath(d)),
       game.events.on('deathEnd', () => setDeath(null)),
@@ -299,10 +299,11 @@ export function Popups({ game }) {
       {win && (
         <div className="win-pop" key={win.id}>
           <div className="confetti2d">
-            {Array.from({ length: 70 }, (_, i) => (
+            {Array.from({ length: win.final ? 180 : 70 }, (_, i) => (
               <i key={i} style={{ '--x': `${(i * 37) % 100}%`, '--d': `${(i % 10) * 0.08}s`, '--r': `${(i * 53) % 360}deg`, '--c': CONFETTI[i % CONFETTI.length] }} />
             ))}
           </div>
+          {win.final && <div className="finish-gold">FINISH!</div>}
           <div className="win-trophy">
             <TrophyIcon />
           </div>

@@ -317,6 +317,9 @@ function KartsPanel({ game, p, onClose }) {
                 <span>
                   <CoinIcon /> x{k.coins} Coins Boost
                 </span>
+                <span>
+                  <ShoeIcon /> Max {formatNumber(k.maxSpeed)} Speed
+                </span>
               </div>
               <div className="ic-buttons">
                 {owned ? (

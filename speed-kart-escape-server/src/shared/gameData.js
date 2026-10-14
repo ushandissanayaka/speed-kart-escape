@@ -14,7 +14,7 @@ export const WORLD = {
   plaza: { minX: -160, maxX: 160, minZ: -55, maxZ: 55 },
   corridor: { minX: -30, maxX: 30, minZ: -125, maxZ: -55 },
   spawn: { x: 0, z: 8, ry: Math.PI }, // ry = PI faces the kart north (-Z)
-  bounds: { minX: -192, maxX: 192, minZ: -3180, maxZ: 55 },
+  bounds: { minX: -192, maxX: 192, minZ: -5640, maxZ: 55 },
   stageGate: { x: 0, z: -128, width: 60 },
   stageTrigger: { minX: -28, maxX: 28, minZ: -175, maxZ: -150 },
   world2Gate: { x: 96, z: -68, radius: 7 },
@@ -54,12 +54,12 @@ export function treadmillAt(x, z) {
 // Karts cost Wins. `speed` multiplies all Speed earned, `coins` all Coins earned.
 // `card` is the background of its card in the Karts popup.
 export const KARTS = [
-  { id: 'noob', name: 'Noob Kart', speed: 1, coins: 1, cost: 0, body: '#eef0fd', trim: '#13214f', accent: '#c9d1ff', card: 'grey', topSpeedBonus: 0 },
-  { id: 'junior', name: 'Junior Kart', speed: 2, coins: 2, cost: 3, body: '#ff2a3a', trim: '#1a1d2e', accent: '#ffffff', card: 'grey', topSpeedBonus: 0.05 },
-  { id: 'pro', name: 'Pro Kart', speed: 4, coins: 3, cost: 25, body: '#ff6a1f', trim: '#1a1d2e', accent: '#e8eaf6', card: 'green', topSpeedBonus: 0.1 },
-  { id: 'water', name: 'Water Kart', speed: 20, coins: 4, cost: 100, body: '#2a9bff', trim: '#0f1f4a', accent: '#9fe8ff', card: 'green', topSpeedBonus: 0.2 },
-  { id: 'crocodile', name: 'Crocodile Kart', speed: 50, coins: 5, cost: 500, body: '#2fd84a', trim: '#122016', accent: '#a8ff7a', card: 'cyan', topSpeedBonus: 0.3 },
-  { id: 'ice', name: 'Ice Kart', speed: 150, coins: 6, cost: 3500, body: '#8ff0ff', trim: '#10204a', accent: '#ffffff', card: 'cyan', topSpeedBonus: 0.4 },
+  { id: 'noob', name: 'Noob Kart', speed: 1, maxSpeed: 300, coins: 1, cost: 0, body: '#eef0fd', trim: '#13214f', accent: '#c9d1ff', card: 'grey', topSpeedBonus: 0 },
+  { id: 'junior', name: 'Junior Kart', speed: 2, maxSpeed: 600, coins: 2, cost: 3, body: '#ff2a3a', trim: '#1a1d2e', accent: '#ffffff', card: 'grey', topSpeedBonus: 0.05 },
+  { id: 'pro', name: 'Pro Kart', speed: 4, maxSpeed: 1500, coins: 3, cost: 25, body: '#ff6a1f', trim: '#1a1d2e', accent: '#e8eaf6', card: 'green', topSpeedBonus: 0.1 },
+  { id: 'water', name: 'Water Kart', speed: 20, maxSpeed: 5000, coins: 4, cost: 100, body: '#2a9bff', trim: '#0f1f4a', accent: '#9fe8ff', card: 'green', topSpeedBonus: 0.2 },
+  { id: 'crocodile', name: 'Crocodile Kart', speed: 50, maxSpeed: 20000, coins: 5, cost: 500, body: '#2fd84a', trim: '#122016', accent: '#a8ff7a', card: 'cyan', topSpeedBonus: 0.3 },
+  { id: 'ice', name: 'Ice Kart', speed: 150, maxSpeed: 100000, coins: 6, cost: 3500, body: '#8ff0ff', trim: '#10204a', accent: '#ffffff', card: 'cyan', topSpeedBonus: 0.4 },
 ];
 
 // Trails: buy with Coins or Gems; the equipped trail multiplies Speed earned.
@@ -154,11 +154,12 @@ export const COURSE = {
 };
 export const STAGES = [
   { n: 1, len: 280, theme: 'grass', wins: 1, coins: 3, coinSpots: [[-24, 75], [26, 150], [-10, 235]], hw: 150 }, // one huge open room
-  { n: 2, len: 420, theme: 'grass', wins: 2, coins: 3, coinSpots: [[75, 72], [8, 180], [-80, 292]], hw: 150, rampH: 22 }, // hill road + rolling logs
-  { n: 3, len: 480, theme: 'spikes', wins: 8, coins: 5, coinSpots: [[100, 60], [-80, 147], [-60, 220], [75, 292], [10, 445]], hw: 150, wallH: 130, baseY: 22 }, // pop-up spike field
-  { n: 4, len: 490, theme: 'pits', wins: 20, coins: 5, coinSpots: [[-62, 75], [70, 132], [50, 194], [-75, 260], [-28, 392]], hw: 120, wallH: 130, baseY: 22 }, // brick floor crossed by full-width lava pits
-  { n: 5, len: 560, theme: 'lava', wins: 50, coins: 5, coinSpots: [[-14, 100], [-127, 125], [70, 165], [112, 290], [-60, 380]], hw: 140, wallH: 130, baseY: 22 }, // jump block to block over lava
-  { n: 6, len: 540, theme: 'corridor', wins: 100, coins: 5, coinSpots: [[41, 140], [-41, 220], [0, 260], [41, 380], [-15, 505]], hw: 52, baseY: 22 }, // red blocks slide along the road, hide in the side bays
+  { n: 2, len: 420, theme: 'grass', wins: 1, coins: 3, coinSpots: [[75, 72], [8, 180], [-80, 292]], hw: 150, rampH: 22 }, // hill road + rolling logs
+  { n: 3, len: 480, theme: 'spikes', wins: 1, coins: 5, coinSpots: [[100, 60], [-80, 147], [-60, 220], [75, 292], [10, 445]], hw: 150, wallH: 130, baseY: 22 }, // pop-up spike field
+  { n: 4, len: 490, theme: 'pits', wins: 1, coins: 5, coinSpots: [[-62, 75], [70, 132], [50, 194], [-75, 260], [-28, 392]], hw: 120, wallH: 130, baseY: 22 }, // brick floor crossed by full-width lava pits
+  { n: 5, len: 692, theme: 'lava', wins: 1, coins: 5, coinSpots: [[0, 100], [-83, 190], [131, 300], [-91, 450], [90, 120]], hw: 170, wallH: 130, baseY: 22 }, // jump block to block over lava
+  { n: 6, len: 760, theme: 'corridor', wins: 1, coins: 5, coinSpots: [[45, 210], [-45, 320], [0, 380], [45, 650], [-20, 720]], hw: 60, baseY: 22 }, // one red block rushes along the road; needs Junior Kart + 600 Speed
+  { n: 7, len: 2000, theme: 'final', wins: 10, coins: 5, coinSpots: [[43, 280], [-43, 550], [43, 840], [-43, 1370], [43, 1620]], hw: 160, wallH: 450, rampH: 124, finishD: 1900 }, // final: hilly road, rolling iron balls, needs Pro Kart
 ];
 // startZ = just past the gate into the stage; endZ = front face of the next gate.
 (() => {
@@ -248,9 +249,14 @@ const trailOf = (id) => TRAILS.find((t) => t.id === id) || TRAILS[0];
 
 // Kart velocity in units/second from the Speed stat. Speed grows without bound,
 // so velocity grows logarithmically and is capped.
+// Each kart can only use Speed up to its own limit (the Speed count keeps growing,
+// but a Noob Kart drives as if it had 300 at most). Better karts unlock more.
+export const usableSpeed = (speed, kartId = 'noob') => Math.min(Math.max(0, speed || 0), kartOf(kartId).maxSpeed ?? Infinity);
+
 export function kartTopVelocity(speed, kartId = 'noob', customSpeed = 0, level = 1) {
-  // New players start slow (~19 units/s); level and Speed make the kart faster.
-  let v = 6 + 1.1 * kartSpeedFor(level) + 4 * Math.log10(1 + Math.max(0, speed));
+  // New players start slow (~19 units/s); usable Speed makes the kart faster:
+  // Noob at its 300 cap ~47, Junior at 600 ~61, Pro at 1500 ~89 units/s.
+  let v = 19.2 + 1.6 * Math.sqrt(usableSpeed(speed, kartId));
   v *= 1 + kartOf(kartId).topSpeedBonus;
   v = Math.min(v, 175);
   if (customSpeed > 0) v = Math.min(v, 6 + 1.1 * customSpeed);
@@ -662,7 +668,9 @@ export function applyStageAction(p, run, action, pos, now) {
     case 'stageWin': {
       const n = Number(action.stage);
       const s = stageDef(n);
-      if (!s || run.maxStage < n || !near(pos, stagePads(n).wins, 14)) return fail('Finish the stage first');
+      // the final stage is won by crossing its finish line; the others on the wins pad
+      const atFinish = s?.finishD && pos && pos.z <= s.startZ - s.finishD && pos.z > s.endZ - 30;
+      if (!s || run.maxStage < n || !(atFinish || near(pos, stagePads(n).wins, 14))) return fail('Finish the stage first');
       if (now - (run.enteredAt[n] || now) < stageMinTimeMs(n)) return fail('Finish the stage first');
       grantWins(p, s.wins);
       p.counters.stagesBeaten = (p.counters.stagesBeaten || 0) + 1;

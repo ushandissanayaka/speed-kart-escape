@@ -1843,6 +1843,31 @@ button {
   align-items: center;
   justify-content: center;
 }
+/* Final stage: big shiny gold FINISH! letters with a light sweep */
+.finish-gold {
+  font-family: var(--fredoka);
+  font-weight: 700;
+  font-size: calc(150px * var(--s));
+  line-height: 1;
+  letter-spacing: calc(4px * var(--s));
+  background: linear-gradient(100deg, #b8730a 0%, #ffd23a 25%, #fff8c8 45%, #ffd23a 55%, #e09a10 75%, #fff3a0 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-stroke: calc(3px * var(--s)) #7a4a00;
+  filter: drop-shadow(0 calc(6px * var(--s)) 0 #5a3300) drop-shadow(0 0 calc(26px * var(--s)) rgba(255, 210, 40, 0.85));
+  animation: finishIn 0.9s cubic-bezier(0.2, 1.6, 0.4, 1) both, finishShine 1.6s linear 0.3s infinite;
+  margin-bottom: calc(10px * var(--s));
+}
+@keyframes finishIn {
+  0% { transform: scale(0.2) rotate(-8deg); opacity: 0; }
+  100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+@keyframes finishShine {
+  0% { background-position: 120% 0; }
+  100% { background-position: -120% 0; }
+}
 .win-trophy {
   width: calc(190px * var(--s));
   height: calc(190px * var(--s));
