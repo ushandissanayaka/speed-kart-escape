@@ -14,7 +14,7 @@ export const WORLD = {
   plaza: { minX: -160, maxX: 160, minZ: -55, maxZ: 55 },
   corridor: { minX: -30, maxX: 30, minZ: -125, maxZ: -55 },
   spawn: { x: 0, z: 8, ry: Math.PI }, // ry = PI faces the kart north (-Z)
-  bounds: { minX: -192, maxX: 192, minZ: -2780, maxZ: 55 },
+  bounds: { minX: -192, maxX: 192, minZ: -3180, maxZ: 55 },
   stageGate: { x: 0, z: -128, width: 60 },
   stageTrigger: { minX: -28, maxX: 28, minZ: -175, maxZ: -150 },
   world2Gate: { x: 96, z: -68, radius: 7 },
@@ -153,12 +153,12 @@ export const COURSE = {
   halfWidth: 60, // drivable half width inside every stage
 };
 export const STAGES = [
-  { n: 1, len: 280, theme: 'grass', wins: 1, hw: 150, coinAmp: 14, coins: 2 }, // one huge open room
-  { n: 2, len: 420, theme: 'grass', wins: 2, hw: 150, coins: 2, coinSpots: [[0, 30], [-90, 140]], rampH: 22 }, // hill road + rolling logs
-  { n: 3, len: 480, theme: 'spikes', wins: 8, hw: 150, coins: 4, coinSpots: [[60, 10], [0, 149], [40, 290], [-40, 440]], wallH: 130, baseY: 22 }, // pop-up spike field
-  { n: 4, len: 490, theme: 'pits', wins: 20, hw: 120, wallH: 130, coins: 4, coinSpots: [[0, 66], [0, 198], [-34, 264], [0, 330]], baseY: 22 }, // lava pits + safe blocks
-  { n: 5, len: 340, theme: 'lava', wins: 50, baseY: 22 },
-  { n: 6, len: 360, theme: 'corridor', wins: 100, baseY: 22 },
+  { n: 1, len: 280, theme: 'grass', wins: 1, coins: 3, coinSpots: [[-24, 75], [26, 150], [-10, 235]], hw: 150 }, // one huge open room
+  { n: 2, len: 420, theme: 'grass', wins: 2, coins: 3, coinSpots: [[75, 72], [8, 180], [-80, 292]], hw: 150, rampH: 22 }, // hill road + rolling logs
+  { n: 3, len: 480, theme: 'spikes', wins: 8, coins: 5, coinSpots: [[100, 60], [-80, 147], [-60, 220], [75, 292], [10, 445]], hw: 150, wallH: 130, baseY: 22 }, // pop-up spike field
+  { n: 4, len: 490, theme: 'pits', wins: 20, coins: 5, coinSpots: [[-62, 75], [70, 132], [50, 194], [-75, 260], [-28, 392]], hw: 120, wallH: 130, baseY: 22 }, // brick floor crossed by full-width lava pits
+  { n: 5, len: 560, theme: 'lava', wins: 50, coins: 5, coinSpots: [[-14, 100], [-127, 125], [70, 165], [112, 290], [-60, 380]], hw: 140, wallH: 130, baseY: 22 }, // jump block to block over lava
+  { n: 6, len: 540, theme: 'corridor', wins: 100, coins: 5, coinSpots: [[41, 140], [-41, 220], [0, 260], [41, 380], [-15, 505]], hw: 52, baseY: 22 }, // red blocks slide along the road, hide in the side bays
 ];
 // startZ = just past the gate into the stage; endZ = front face of the next gate.
 (() => {

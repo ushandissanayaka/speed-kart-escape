@@ -88,7 +88,7 @@ export class Game {
     this.world = new StartingPlace(this.scene);
     this.input = new Input();
     this.rig = new CameraRig(this.camera, renderer.domElement);
-    this.rig.bounds = { minX: -193, maxX: 193, minZ: -2780, maxZ: 54.5 };
+    this.rig.bounds = { minX: -193, maxX: 193, minZ: -3180, maxZ: 54.5 };
     this.controller = new KartController(this.world.collision);
     this.confetti = new Confetti(this.scene);
 
@@ -391,7 +391,7 @@ export class Game {
     // Coins
     for (const coin of this.world.course.coins) {
       if (now < coin.hiddenUntil || coin.def.stage !== s) continue;
-      if (Math.hypot(c.x - coin.def.x, c.z - coin.def.z) < 7) {
+      if (Math.hypot(c.x - coin.def.x, c.z - coin.def.z) < 8.5) {
         coin.hiddenUntil = now + STAGE_COIN_COOLDOWN_MS;
         sfx.coin();
         this.stageAction({ type: 'collectCoin', id: coin.def.id });
