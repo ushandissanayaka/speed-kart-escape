@@ -82,6 +82,7 @@ export function Hud({ game, profile, online, serverOffset, openPanel }) {
   return (
     <div className="hud">
       {!online && <div className="offline-chip o">Offline mode</div>}
+      <UserChip game={game} />
 
       <EventPill now={now} />
       {turboLeft > 0 && (
@@ -492,6 +493,37 @@ export function ControlLayer({ game, touch }) {
           </div>
         )
       )}
+    </div>
+  );
+}
+
+// Top-right profile chip (Boxity): picture (or the default character), name, Gems.
+// Logged out: tap it to log in.
+function UserChip({ game }) {
+  const [user, setUser] = useState(() => (game.userInfo ? { ...game.userInfo } : null));
+  const [fps, setFps] = useState(null);
+  useEffect(() => {
+    const offs = [game.events.on('user', (u) => setUser(u)), game.events.on('fps', (f) => setFps(f))];
+    return () => offs.forEach((off) => off());
+  }, [game]);
+  if (!user) return null;
+  const pic = user.pfp || user.icon;
+  return (
+    <div className="user-chip-wrap">
+      <button className={`user-chip${user.isGuest ? ' guest press' : ''}`} onClick={user.isGuest ? () => game.login() : undefined} title={user.isGuest ? 'Log in' : user.name}>
+        <span className="uc-pic">{pic ? <img src={pic} alt="" draggable="false" onError={(e) => user.icon && (e.currentTarget.src = user.icon)} /> : null}</span>
+        <span className="uc-name">{user.name}</span>
+        <span className="uc-sep" />
+        {user.isGuest ? (
+          <span className="uc-login">Log in</span>
+        ) : (
+          <span className="uc-gems">
+            <GemIcon />
+            {user.gems === null ? '…' : formatNumber(user.gems)}
+          </span>
+        )}
+      </button>
+      {fps !== null && <div className="uc-fps">{fps} FPS</div>}
     </div>
   );
 }

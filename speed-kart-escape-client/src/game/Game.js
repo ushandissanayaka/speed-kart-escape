@@ -12,7 +12,7 @@ import { setMaxAnisotropy } from './util/textures.js';
 import { loadFonts } from './util/text.js';
 import { renderKartThumbs } from './util/kartThumbs.js';
 import { sfx } from './audio/Sfx.js';
-import { Emitter, openSession } from '../net/Session.js';
+import { Emitter, openSession, HOSTED } from '../net/Session.js';
 import * as legion from '../bloxity/legion.js';
 import {
   STAGE_COIN_COOLDOWN_MS,
@@ -68,6 +68,11 @@ export class Game {
 
   async start() {
     legion.initLegion();
+    // On boot (before assets load): Boxity shows its emote button only for games
+    // that register it; party play on our own servers needs enable().
+    legion.registerFeature('emotes');
+    if (!HOSTED) legion.enableParty(24);
+    this.loadEmotes();
     this.step('Loading fonts…', 0.08);
     await loadFonts();
 
@@ -107,6 +112,9 @@ export class Game {
 
     this.step('Loading your avatar…', 0.7);
     await this.player.loadAvatar(legion.getAvatarData()).catch(() => {});
+    // Profile chip (top right): name, picture (or the default character) and Gems
+    this.userInfo = { name: identity.displayName || identity.username || 'Guest', pfp: identity.pfp || null, isGuest: !!identity.isGuest, gems: null, icon: null };
+    this.updateAvatarIcon();
 
     try {
       this.kartThumbs = renderKartThumbs();
@@ -120,18 +128,59 @@ export class Game {
     this.session.setAvatar(JSON.stringify(legion.getAvatarData()));
     this.offAvatar = legion.onAvatarChanged(() => {
       const data = legion.getAvatarData();
-      this.player.loadAvatar(data);
+      this.player.loadAvatar(data).then(() => this.updateAvatarIcon()).catch(() => {});
       this.session.setAvatar(JSON.stringify(data));
     });
     this.offPlayerEvents = legion.onPlayerEvent((event, data) => {
       if (event === 'respawn_request') this.respawn();
       if (event === 'pointer_lock_changed') this.input.enabled = !data;
+      if (event === 'play_emote') this.playEmote(String(data || ''));
     });
 
     this.onResize = () => this.resize();
     window.addEventListener('resize', this.onResize);
     this.onVisibility = () => (document.hidden ? legion.gameplayEnd() : legion.gameplayStart());
     document.addEventListener('visibilitychange', this.onVisibility);
+
+    // Boxity chat: show each message as a bubble above the sender's kart
+    this.offChat = legion.onChatMessage((m) => {
+      if (this.chatOff || !m) return;
+      let root = null;
+      if (m.isLocalPlayer) root = this.player.root;
+      else {
+        const uid = String(m.userId || '').replace(/^legion_/, '');
+        for (const r of this.remotes.values()) if (uid && r.legionId === uid) root = r.racer.root;
+      }
+      if (root) legion.attachChatBubble(THREE, root, m);
+    });
+
+    // Boxity settings (registering a listener also adds the control to the portal menu)
+    const num = (v, d) => (Number.isFinite(Number(v)) && v !== '' ? Number(v) : d);
+    this.offSettings = [
+      legion.listenSetting('master_volume', (v) => sfx.setVolume(num(v, 80) / 100)),
+      legion.listenSetting('music_volume', (v) => sfx.setMusicLevel(num(v, 80) / 100)),
+      legion.listenSetting('graphics_quality', (v) => this.setQuality(v)),
+      legion.listenSetting('show_fps', (v) => {
+        this.showFps = v === 'true';
+        this.events.emit('fps', this.showFps ? this.fps || 60 : null);
+      }),
+      legion.listenSetting('camera_sensitivity', (v) => (this.rig.sensitivity = Math.max(0.1, Math.min(5, num(v, 1))))),
+      legion.listenSetting('enable_chat', (v) => (this.chatOff = v === 'false')),
+      legion.listenSetting('fullscreen', (v) => (v === 'true' ? legion.requestFullscreen() : legion.exitFullscreen())),
+    ];
+    legion.triggerAllSettings();
+
+    // Esc opens the Boxity pause menu
+    this.onEsc = (e) => {
+      if (e.key === 'Escape') legion.showMenu(true);
+    };
+    window.addEventListener('keydown', this.onEsc);
+
+    // Gems balance for the profile chip
+    this.refreshGems();
+    this.gemTimer = setInterval(() => this.refreshGems(), 60_000);
+    this.onFocus = () => this.refreshGems();
+    window.addEventListener('focus', this.onFocus);
 
     // Warm up behind the loading screen: compile every shader and upload every
     // texture now, including things that are hidden or off-screen (later stages,
@@ -209,6 +258,11 @@ export class Game {
     s.on('playerAdd', ({ id, p }) => this.addRemote(id, p));
     s.on('playerChange', ({ id, p }) => this.updateRemote(id, p));
     s.on('playerRemove', ({ id }) => this.removeRemote(id));
+    s.on('emote', ({ id, emote }) => {
+      const r = this.remotes.get(id);
+      const clip = this.emoteClips?.get(String(emote));
+      if (r && clip) r.racer.avatar.playEmote(clip);
+    });
   }
 
   // --- remote players ------------------------------------------------------
@@ -218,7 +272,7 @@ export class Game {
     const racer = new Racer(this.scene, { name: p.name, showName: true, kart: p.kart, trail: p.trail });
     racer.root.position.set(p.x, 0, p.z);
     racer.root.rotation.y = p.ry;
-    const r = { racer, x: p.x, z: p.z, ry: p.ry, v: p.v, avatarJson: '' };
+    const r = { racer, x: p.x, z: p.z, ry: p.ry, v: p.v, avatarJson: '', legionId: p.legionId || '' };
     this.remotes.set(id, r);
     this.updateRemote(id, p);
   }
@@ -230,6 +284,7 @@ export class Game {
     r.z = p.z;
     r.ry = p.ry;
     r.v = p.v;
+    r.legionId = p.legionId || '';
     r.racer.setKart(p.kart);
     r.racer.setTrail(p.trail);
     if (p.avatar && p.avatar !== r.avatarJson) {
@@ -251,6 +306,122 @@ export class Game {
     this.remotes.delete(id);
   }
 
+  // --- Boxity -------------------------------------------------------------
+
+  // Emote catalogue: [{ id, name, price, free, icon, clip }]
+  loadEmotes() {
+    this.emoteClips = new Map();
+    fetch('https://api.bloxity.io/v1/avatar/emotes')
+      .then((r) => r.json())
+      .then((d) => {
+        const list = Array.isArray(d) ? d : d?.emotes || d?.items || d?.data || [];
+        for (const e of list) if (e?.id && e.clip) this.emoteClips.set(String(e.id), e.clip);
+      })
+      .catch(() => {});
+  }
+
+  // From the Boxity emote picker: play on our character and replicate. Unknown ids
+  // are ignored (Boxity only sends emotes the player owns).
+  playEmote(id) {
+    const clip = this.emoteClips?.get(id);
+    if (!clip || this.dead) return;
+    this.player.avatar.playEmote(clip);
+    this.session?.sendEmote?.(id);
+  }
+
+  emitUser() {
+    if (this.userInfo) this.events.emit('user', { ...this.userInfo });
+  }
+
+  async refreshGems() {
+    if (!this.userInfo || this.userInfo.isGuest) return;
+    this.userInfo.gems = await legion.getGemBalance();
+    this.emitUser();
+  }
+
+  login() {
+    legion.showAuthPopup();
+  }
+
+  // Small portrait of the player's own character (the default Boxity character when
+  // logged out), rendered from the 3D avatar into a picture for the profile chip.
+  updateAvatarIcon() {
+    if (!this.userInfo) return;
+    try {
+      const size = 128;
+      const r = this.renderer;
+      const av = this.player.avatar;
+      const head = av.bones?.Neck1 || av.root;
+      const p = new THREE.Vector3();
+      head.getWorldPosition(p);
+      const target = p.add(new THREE.Vector3(0, 0.9, 0));
+      const ry = this.controller.ry;
+      const cam = new THREE.PerspectiveCamera(30, 1, 0.1, 200);
+      cam.position.set(target.x + Math.sin(ry) * 7, target.y + 0.8, target.z + Math.cos(ry) * 7);
+      cam.lookAt(target);
+      cam.layers.set(5); // only the avatar (and the lights) are drawn
+      const tagged = [];
+      av.root.traverse((o) => {
+        o.layers.enable(5);
+        tagged.push(o);
+      });
+      this.scene.traverse((o) => o.isLight && o.layers.enable(5));
+      const bg = this.scene.background;
+      const fog = this.scene.fog;
+      this.scene.background = new THREE.Color('#3a5ab8');
+      this.scene.fog = null;
+      const rt = new THREE.WebGLRenderTarget(size, size);
+      rt.texture.colorSpace = THREE.SRGBColorSpace;
+      r.setRenderTarget(rt);
+      r.render(this.scene, cam);
+      r.setRenderTarget(null);
+      this.scene.background = bg;
+      this.scene.fog = fog;
+      for (const o of tagged) o.layers.disable(5);
+      const px = new Uint8Array(size * size * 4);
+      r.readRenderTargetPixels(rt, 0, 0, size, size, px);
+      rt.dispose();
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      const img = ctx.createImageData(size, size);
+      for (let y = 0; y < size; y++) img.data.set(px.subarray((size - 1 - y) * size * 4, (size - y) * size * 4), y * size * 4); // flip
+      ctx.putImageData(img, 0, 0);
+      this.userInfo.icon = canvas.toDataURL('image/png');
+    } catch {
+      this.userInfo.icon = null;
+    }
+    this.emitUser();
+  }
+
+  // Boxity graphics_quality. "High" is the game's normal look.
+  setQuality(q) {
+    const r = this.renderer;
+    if (!r) return;
+    const dpr = window.devicePixelRatio || 1;
+    const conf =
+      {
+        Low: { pr: 0.75, shadows: false, map: 1024 },
+        Medium: { pr: 1, shadows: true, map: 1024 },
+        High: { pr: Math.min(dpr, 1.5), shadows: true, map: 2048 },
+        Ultra: { pr: Math.min(dpr, 2), shadows: true, map: 2048 },
+      }[q] || { pr: Math.min(dpr, 1.5), shadows: true, map: 2048 };
+    r.setPixelRatio(conf.pr);
+    if (r.shadowMap.enabled !== conf.shadows) {
+      r.shadowMap.enabled = conf.shadows;
+      this.scene.traverse((o) => {
+        if (o.material) [].concat(o.material).forEach((m) => (m.needsUpdate = true));
+      });
+    }
+    const sun = this.world?.sun;
+    if (sun && sun.shadow.mapSize.x !== conf.map) {
+      sun.shadow.mapSize.set(conf.map, conf.map);
+      sun.shadow.map?.dispose();
+      sun.shadow.map = null;
+    }
+    this.resize?.();
+  }
+
   // --- public API for the HUD ---------------------------------------------
 
   action(a) {
@@ -266,10 +437,14 @@ export class Game {
 
   // Called by the popup's Buy button: hands the purchase to the Bloxity SDK.
   async confirmPurchase(sku) {
-    const res = await legion.requestPurchase(sku, this.identity?._id);
+    const res = await legion.requestPurchase(sku); // sku only: price comes from the Boxity catalog
     if (res?.success) {
+      // The item is granted on our server by Boxity's webhook (keyed by transactionId);
+      // pull the updated profile now and once more in case the webhook is a moment late.
       this.events.emit('toast', { text: 'Purchase complete!', kind: 'good' });
       this.session?.sync();
+      setTimeout(() => this.session?.sync(), 2500);
+      this.refreshGems();
     } else if (res?.error && res.error !== 'User cancelled') {
       this.events.emit('toast', { text: res.error, kind: 'bad' });
     }
@@ -511,6 +686,16 @@ export class Game {
       sun.target.updateMatrixWorld();
     }
     this.player.animate(dt, c.v, c.steer, c.accel, c.topSpeed, c.jumpY > 0.4);
+    if (this.player.avatar.emote && Math.abs(c.v) > 3) this.player.avatar.stopEmote(); // moving ends an emote
+    if (this.showFps) {
+      this.fpsFrames = (this.fpsFrames || 0) + 1;
+      this.fpsTime = (this.fpsTime || 0) + dt;
+      if (this.fpsTime >= 0.5) {
+        this.fps = Math.round(this.fpsFrames / this.fpsTime);
+        this.events.emit('fps', this.fps);
+        this.fpsFrames = this.fpsTime = 0;
+      }
+    }
 
     for (const r of this.remotes.values()) {
       const root = r.racer.root;
@@ -530,6 +715,7 @@ export class Game {
       root.updateMatrixWorld();
       const moved = Math.hypot(root.position.x - prevX, root.position.z - prevZ) / Math.max(dt, 1e-3);
       r.racer.animate(dt, Math.sign(r.v || 1) * moved, Math.max(-1, Math.min(1, d * 3)), 0, 60);
+      if (moved > 3 && r.racer.avatar.emote) r.racer.avatar.stopEmote();
     }
 
     this.rig.update(dt, this.player.root.position, c.v);
@@ -608,6 +794,11 @@ export class Game {
     this.offAvatar?.();
     this.offPlayerEvents?.();
     this.offUser?.();
+    this.offChat?.();
+    this.offSettings?.forEach((off) => typeof off === 'function' && off());
+    window.removeEventListener('keydown', this.onEsc);
+    window.removeEventListener('focus', this.onFocus);
+    clearInterval(this.gemTimer);
     window.removeEventListener('resize', this.onResize);
     document.removeEventListener('visibilitychange', this.onVisibility);
     legion.gameplayEnd();

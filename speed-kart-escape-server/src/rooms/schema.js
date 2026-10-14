@@ -13,6 +13,7 @@ export class PlayerState extends Schema {
     this.avatar = ''; // JSON: { equipped, proportions, skinUrl }
     this.speed = 0;
     this.isGuest = true;
+    this.legionId = ''; // Boxity user id (chat bubbles, invites)
   }
 }
 defineTypes(PlayerState, {
@@ -26,6 +27,7 @@ defineTypes(PlayerState, {
   avatar: 'string',
   speed: 'float64',
   isGuest: 'boolean',
+  legionId: 'string',
 });
 
 export class StartingPlaceState extends Schema {

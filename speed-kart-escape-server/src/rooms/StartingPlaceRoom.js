@@ -36,6 +36,12 @@ export class StartingPlaceRoom extends Room {
     this.onMessage('avatar', (client, m) => this.handleAvatar(client, m));
     this.onMessage('stage', (client, m) => this.handleStage(client, m));
     this.onMessage('sync', (client) => this.pushProfile(client));
+    // Boxity emotes: replicate the catalogue id to everyone else in the room
+    this.onMessage('emote', (client, m) => {
+      const id = String(m?.id || '');
+      if (!/^[\w-]{1,48}$/.test(id)) return;
+      this.broadcast('emote', { id: client.sessionId, emote: id }, { except: client });
+    });
 
     this.clock.setInterval(() => this.tickSecond(), 1000);
     this.clock.setInterval(() => this.broadcastLeaderboards(), LEADERBOARD_INTERVAL_MS);
@@ -69,6 +75,7 @@ export class StartingPlaceRoom extends Room {
     const ps = new PlayerState();
     ps.name = auth.name;
     ps.isGuest = auth.isGuest;
+    ps.legionId = auth.legionId || '';
     ps.x = WORLD.spawn.x;
     ps.z = WORLD.spawn.z;
     ps.ry = WORLD.spawn.ry;

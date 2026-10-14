@@ -21,8 +21,9 @@ export class CameraRig {
 
   // Drag deltas in screen pixels
   orbit(dx, dy) {
-    this.yaw -= dx * 0.006;
-    this.pitch = THREE.MathUtils.clamp(this.pitch + dy * 0.004, 0.05, 1.35);
+    const k = this.sensitivity ?? 1; // Boxity camera_sensitivity setting
+    this.yaw -= dx * 0.006 * k;
+    this.pitch = THREE.MathUtils.clamp(this.pitch + dy * 0.004 * k, 0.05, 1.35);
   }
 
   zoom(factor) {
