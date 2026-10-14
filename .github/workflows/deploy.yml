@@ -19,8 +19,11 @@
 #     https://speed-kart-escape.host.bloxity.io/api/webhook/legion
 #
 # Scaling: every room holds SEAT_CAP players and Legion adds pods as players
-# arrive. SEAT_CAP x MAX_REPLICAS is the ceiling:
-#   40 seats x 2500 pods = 100,000 players at once.
+# arrive. SEAT_CAP x MAX_REPLICAS is the ceiling. Legion allows at most 500
+# replicas per app (HTTP 400 "maxReplicas <= 500" above that):
+#   40 seats x 500 pods = 20,000 players at once.
+# For more, ask Bloxity to raise the replica limit, or raise SEAT_CAP (Boxity
+# party play allows rooms of up to 100: 100 x 500 = 50,000).
 #
 # BEFORE THE FIRST RUN: the app must already exist on hosting.bloxity.io with the
 # id below (GAME_ID). Legion has no create-on-deploy; deploying to an app it has
@@ -48,9 +51,10 @@ env:
   IMAGE_NAME: speed-kart-escape-server
   SERVER_DIR: speed-kart-escape-server
   CLIENT_DIR: speed-kart-escape-client
-  # Seats per room (the server's maxClients is set from this) and the most pods.
+  # Seats per room (the server's maxClients is set from this) and the most pods
+  # (Legion's limit is 500).
   SEAT_CAP: '40'
-  MAX_REPLICAS: '2500'
+  MAX_REPLICAS: '500'
 
 jobs:
   deploy:
