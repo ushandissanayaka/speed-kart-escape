@@ -1,7 +1,7 @@
 import { Room } from '@colyseus/core';
 import { StartingPlaceState, PlayerState } from './schema.js';
 import { readSession } from '../auth/legionAuth.js';
-import { getRecord, scheduleSave, computeLeaderboards } from '../game/profiles.js';
+import { loadRecord, scheduleSave, computeLeaderboards, setOnlineCheck } from '../game/profiles.js';
 import { clampToBounds, driveGain, isJump, runAction, treadmillTick, validatedDistance } from '../game/economy.js';
 import { WORLD, computeAway, allowedTeleport, applyStageAction, newProfile, newRun, publicSummary, refreshDaily, trackStage } from '../shared/gameData.js';
 
@@ -10,6 +10,9 @@ const MAX_AVATAR_JSON = 4000;
 
 // legionId -> { room, client } so webhook purchases can reach an online player.
 const online = new Map();
+setOnlineCheck((legionId) => online.has(legionId));
+
+export const onlineLegionIds = () => [...online.keys()];
 
 export function notifyProfileChanged(legionId, toast) {
   const entry = online.get(legionId);
@@ -24,8 +27,12 @@ export function onlineLegionRecords() {
 
 const cleanName = (s) => String(s || '').replace(/[^\w .-]/g, '').trim().slice(0, 20) || 'Guest';
 
+// Seats per room. Must equal the seatCap the deploy workflow sends to Boxity Legion
+// (SEAT_CAP is baked into the server image), so the matchmaker and the room agree.
+export const SEAT_CAP = Math.max(2, Math.min(100, Number(process.env.SEAT_CAP) || 24));
+
 export class StartingPlaceRoom extends Room {
-  maxClients = 24;
+  maxClients = SEAT_CAP;
 
   onCreate() {
     this.setState(new StartingPlaceState());
@@ -53,14 +60,15 @@ export class StartingPlaceRoom extends Room {
     return { legionId: null, name: cleanName(options?.guestName), isGuest: true };
   }
 
-  onJoin(client, options, auth) {
+  async onJoin(client, options, auth) {
     // Kick an older connection of the same account so a profile is only driven from one place.
     if (auth.legionId && online.has(auth.legionId)) {
       const prev = online.get(auth.legionId);
       prev.client.leave(4001, 'Joined from another tab');
     }
 
-    const record = auth.isGuest ? { name: auth.name, avatar: null, profile: newProfile() } : getRecord(auth.legionId, auth.name);
+    // With MongoDB the profile is read fresh: the player may have played on another pod.
+    const record = auth.isGuest ? { name: auth.name, avatar: null, profile: newProfile() } : await loadRecord(auth.legionId, auth.name);
     client.userData = { auth, record, pos: null, lastMoveAt: 0, dirty: false, playtime: { start: Date.now(), claimed: new Set() }, run: newRun() };
     refreshDaily(record.profile);
     if (auth.isGuest) {
@@ -93,7 +101,7 @@ export class StartingPlaceRoom extends Room {
     this.state.players.delete(client.sessionId);
     if (ud?.auth.legionId) {
       if (online.get(ud.auth.legionId)?.client === client) online.delete(ud.auth.legionId);
-      scheduleSave();
+      scheduleSave(ud.auth.legionId);
     }
   }
 
@@ -195,7 +203,7 @@ export class StartingPlaceRoom extends Room {
     const { transactions, ...visible } = p;
     client.send('profile', { profile: visible, serverNow: Date.now(), playtime: { start: ud.playtime.start, claimed: [...ud.playtime.claimed] } });
     if (toast) client.send('toast', { text: toast });
-    if (ud.auth.legionId) scheduleSave();
+    if (ud.auth.legionId) scheduleSave(ud.auth.legionId);
   }
 
   leaderboards() {
